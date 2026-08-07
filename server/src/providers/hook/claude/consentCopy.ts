@@ -18,8 +18,8 @@ const SETTINGS_FILE = '~/.claude/settings.json';
 
 /** WHAT we write. */
 export const CONSENT_FACT_WHAT =
-  `Adds hook entries for ${CLAUDE_HOOK_EVENTS.length} Claude Code events to ${SETTINGS_FILE}. ` +
-  `Your existing settings are kept, and a one-time backup is saved as settings.json${SETTINGS_BACKUP_SUFFIX}.`;
+  `This adds hook entries for ${CLAUDE_HOOK_EVENTS.length} Claude Code events to ${SETTINGS_FILE}. ` +
+  `Your existing settings are kept, and a one-time backup is saved next to them as settings.json${SETTINGS_BACKUP_SUFFIX}.`;
 
 /** WHAT data moves, and where it stops.
  *
@@ -33,7 +33,7 @@ export const CONSENT_FACT_WHAT =
 export const CONSENT_FACT_DATA =
   'Claude Code will send those events - including tool names and tool inputs - to a Pixel Agents ' +
   'server on this machine. It is not sent anywhere else: by default the server listens on ' +
-  '127.0.0.1 only, reachable from this machine alone (starting it with --host exposes it to your ' +
+  '127.0.0.1 only, reachable from this machine alone (note that starting it with --host exposes it to your ' +
   'network).';
 
 /** HOW to undo it. */
