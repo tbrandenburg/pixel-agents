@@ -372,6 +372,57 @@ describe('claudeHookInstaller', () => {
     expect(fs.existsSync(backupPath)).toBe(false);
   });
 
+  // 8c-2. ...and later writes to a file OUR install created still take none.
+  //       The backup preserves the user's pre-Pixel-Agents file; when the only
+  //       content ever in the file is our own install, a backup enshrines our
+  //       output as "the user's original". Observed in a fresh home: the first
+  //       uninstall backed up the install's own 12 entries.
+  it('creates no backup across uninstall/reinstall of a file our install created', async () => {
+    const backupPath = settingsPathFor() + SETTINGS_BACKUP_SUFFIX;
+    await installHooks();
+    await uninstallHooks();
+    expect(fs.existsSync(backupPath)).toBe(false);
+    await installHooks();
+    expect(fs.existsSync(backupPath)).toBe(false);
+  });
+
+  // 8c-3. The skip is content-based, not a permanent waiver: the moment the
+  //       file holds anything user-authored, the next write backs it up —
+  //       capturing the user's addition, not the pre-install void.
+  it('backs up before the next write once user content joins a file we created', async () => {
+    const settingsPath = settingsPathFor();
+    const backupPath = settingsPath + SETTINGS_BACKUP_SUFFIX;
+    await installHooks();
+
+    const withUserKey = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    withUserKey.model = 'opus';
+    fs.writeFileSync(settingsPath, JSON.stringify(withUserKey, null, 2));
+
+    await uninstallHooks();
+    const backedUp = JSON.parse(fs.readFileSync(backupPath, 'utf-8'));
+    expect(backedUp.model).toBe('opus');
+  });
+
+  // 8c-4. A foreign hook inside an otherwise all-ours file counts as user
+  //       content the same way a top-level key does.
+  it('backs up when a foreign hook entry joins a file we created', async () => {
+    const settingsPath = settingsPathFor();
+    const backupPath = settingsPath + SETTINGS_BACKUP_SUFFIX;
+    await installHooks();
+
+    const withForeign = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    withForeign.hooks.Stop.push({
+      matcher: '',
+      hooks: [{ type: 'command', command: 'their-tool --observe' }],
+    });
+    fs.writeFileSync(settingsPath, JSON.stringify(withForeign, null, 2));
+
+    await uninstallHooks();
+    expect(fs.existsSync(backupPath)).toBe(true);
+    const backedUp = JSON.parse(fs.readFileSync(backupPath, 'utf-8'));
+    expect(JSON.stringify(backedUp.hooks.Stop)).toContain('their-tool --observe');
+  });
+
   // ── W1: the write path throws instead of logging ──────────────
   //
   // A swallowed write error used to leave callers logging "Hooks installed"
