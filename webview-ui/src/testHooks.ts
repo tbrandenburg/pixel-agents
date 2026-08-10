@@ -119,7 +119,9 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
   hooks.getCharacters = () => {
     const os = officeStateRef.current;
     if (!os) return [];
-    return Array.from(os.characters.values()).map((ch) => ({
+    // getCharacters(), not `characters`: e2e asserts on the consent greeter,
+    // which lives outside the agent map and joins only at the render seam.
+    return os.getCharacters().map((ch) => ({
       id: ch.id,
       matrixEffect: ch.matrixEffect,
       agentName: ch.agentName,
@@ -246,7 +248,7 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
     const os = officeStateRef.current;
     if (!os) return [];
     return Array.from(os.characters.values())
-      .filter((ch) => !ch.isSubagent && !ch.isGreeter)
+      .filter((ch) => !ch.isSubagent)
       .map((ch) => ({
         id: ch.id,
         seatId: ch.seatId,

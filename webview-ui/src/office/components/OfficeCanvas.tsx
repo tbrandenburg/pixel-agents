@@ -773,20 +773,10 @@ export function OfficeCanvas({
                   officeState.reassignSeat(officeState.selectedAgentId, seatId);
                   officeState.selectedAgentId = null;
                   officeState.cameraFollowId = null;
-                  // Persist seat assignments (exclude sub-agents)
-                  const seats: Record<
-                    number,
-                    { palette: number; hueShift: number; seatId: string | null }
-                  > = {};
-                  for (const ch of officeState.characters.values()) {
-                    if (ch.isSubagent) continue;
-                    seats[ch.id] = {
-                      palette: ch.palette,
-                      hueShift: ch.hueShift,
-                      seatId: ch.seatId,
-                    };
-                  }
-                  transport.send({ type: 'saveAgentSeats', seats });
+                  transport.send({
+                    type: 'saveAgentSeats',
+                    seats: officeState.getPersistableSeats(),
+                  });
                   return;
                 }
               }

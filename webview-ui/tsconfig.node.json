@@ -2,10 +2,7 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2023",
-    /* DOM types are for TYPE-CHECKING src modules that unit tests import
-       (e.g. OfficeState → matrixEffect's CanvasRenderingContext2D). The tests
-       themselves run in Node — don't touch DOM globals at test runtime. */
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": ["ES2023"],
     "module": "ESNext",
     "baseUrl": ".",
     "paths": {

@@ -87,7 +87,7 @@ test('spawn is idempotent, and revives a greeter caught mid-despawn', () => {
   os.spawnConsentGreeter();
   os.spawnConsentGreeter();
   assert.equal(
-    Array.from(os.characters.values()).filter((c) => c.isGreeter).length,
+    os.getCharacters().filter((c) => c.isGreeter).length,
     1,
     'double spawn keeps a single greeter',
   );
@@ -123,6 +123,55 @@ test('is invisible to hit-testing — clicks pass through', () => {
   const ch = os.getConsentGreeter()!;
 
   assert.equal(os.getCharacterAt(ch.x, ch.y - 1), null, 'no hit on the greeter sprite');
+});
+
+/**
+ * The structural invariant the rest of this file rests on: the greeter is not
+ * in `characters`, so every consumer that iterates the agent map — seat
+ * assignment, palette diversity, hit-testing, and the seat payload the webview
+ * persists — excludes it without needing to know it exists. It joins the
+ * agents at exactly one seam, `getCharacters()`, which is what the renderer
+ * draws.
+ */
+test('lives outside the agent map, and is drawn anyway', () => {
+  const os = new OfficeState(floorLayout());
+  os.addAgent(1, 0, 0);
+  os.spawnConsentGreeter();
+
+  assert.equal(os.characters.size, 1, 'the agent map holds the agent alone');
+  assert.equal(os.characters.get(CONSENT_GREETER_ID), undefined);
+  assert.ok(
+    os.getCharacters().some((c) => c.isGreeter),
+    'but the render feed includes it',
+  );
+});
+
+test('never reaches the persisted seat payload', () => {
+  const os = new OfficeState(floorLayout());
+  os.addAgent(7, 0, 0);
+  os.spawnConsentGreeter();
+
+  const seats = os.getPersistableSeats();
+  assert.deepEqual(Object.keys(seats), ['7'], 'only the real agent is persisted');
+  assert.equal(
+    CONSENT_GREETER_ID.toString() in seats,
+    false,
+    'a greeter entry would outlive the ask in ~/.pixel-agents state',
+  );
+});
+
+test('does not consume a palette slot in diversity counting', () => {
+  const os = new OfficeState(floorLayout());
+  // char_0 is the greeter's palette. If it counted toward diversity, the first
+  // real agent would be steered away from palette 0 by a prop.
+  os.spawnConsentGreeter();
+  os.addAgent(1, 0, 0);
+
+  assert.equal(
+    os.getCharacters().filter((c) => !c.isGreeter && c.palette === 0).length,
+    1,
+    'the agent keeps palette 0',
+  );
 });
 
 test('a layout rebuild never seats or repositions the greeter', () => {

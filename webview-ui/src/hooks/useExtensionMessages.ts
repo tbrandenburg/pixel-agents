@@ -109,12 +109,7 @@ interface ExtensionMessageState {
 }
 
 function saveAgentSeats(os: OfficeState): void {
-  const seats: Record<number, { palette: number; hueShift: number; seatId: string | null }> = {};
-  for (const ch of os.characters.values()) {
-    if (ch.isSubagent) continue;
-    seats[ch.id] = { palette: ch.palette, hueShift: ch.hueShift, seatId: ch.seatId };
-  }
-  transport.send({ type: 'saveAgentSeats', seats });
+  transport.send({ type: 'saveAgentSeats', seats: os.getPersistableSeats() });
 }
 
 export function useExtensionMessages(
