@@ -35,9 +35,9 @@ import {
 } from '../../server/src/layoutPersistence.js';
 import { PathSet } from '../../server/src/pathKey.js';
 import {
-  CONSENT_DISCLOSURE,
-  CONSENT_INSTALL_HEADLINE,
-} from '../../server/src/providers/hook/claude/consentCopy.js';
+  consentActionFor,
+  hooksConsentRequest,
+} from '../../server/src/providers/hook/claude/consentGate.js';
 import { claudeProvider, copyHookScript } from '../../server/src/providers/index.js';
 import { PixelAgentsServer } from '../../server/src/server.js';
 import {
@@ -354,27 +354,32 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     await this.installHooksAndScript(port, token);
   }
 
-  /** The webview consent dialog's answer. Fail-closed on exact matches, the
-   *  same shape the native modal enforced by object identity: only 'install'
-   *  grants consent and installs, only 'never' persists hooks-off, and every
-   *  other value — 'notNow', a dismissal that never sends, a malformed
-   *  message — writes NOTHING and the dialog simply shows again on the next
-   *  webviewReady. A typo must never be read as approval. */
+  /** The webview consent dialog's answer. The fail-closed choice→action rule
+   *  lives in consentGate (shared with the standalone surface, so the two
+   *  cannot drift on what counts as approval). */
   private async handleHooksConsentResponse(choice: unknown): Promise<void> {
-    if (choice === 'install') {
-      // Clicking Install IS the consent grant, exactly like the Settings
-      // toggle — mirror setHooksEnabled, including the shrug at getConfig()
-      // being undefined while the server is still starting: the Claude
-      // provider ignores both arguments (the hook script discovers the
-      // server through ~/.pixel-agents/server.json at runtime).
-      grantHooksConsent();
-      const serverConfig = this.pixelAgentsServer?.getConfig();
-      await this.installHooksAndScript(serverConfig?.port, serverConfig?.token);
-    } else if (choice === 'never') {
-      // Persist hooks-off WITHOUT touching ~/.claude/settings.json — the
-      // dialog only shows when nothing of ours is installed.
-      this.adapter.setSetting(GLOBAL_KEY_HOOKS_ENABLED, false);
-      this.runtime.hooksEnabled.current = false;
+    switch (consentActionFor(choice)) {
+      case 'install':
+        // Clicking Install IS the consent grant, exactly like the Settings
+        // toggle — so it goes through setHooksEnabled, which grants consent,
+        // installs, then re-derives the on-disk state before persisting the
+        // preference. Reimplementing the grant here is how this path lost that
+        // last step: an install could land while a "Don't Ask Again" from
+        // another window kept the preference off, leaving the runtime treating
+        // live hooks as disabled.
+        await this.setHooksEnabled(true);
+        break;
+      case 'persistOff':
+        // Persist hooks-off WITHOUT touching ~/.claude/settings.json — the
+        // dialog only shows when nothing of ours is installed, so there is
+        // nothing to remove, and routing through the uninstaller would surface
+        // a file error for the act of declining.
+        this.adapter.setSetting(GLOBAL_KEY_HOOKS_ENABLED, false);
+        this.runtime.hooksEnabled.current = false;
+        await this.reportHooksStatus();
+        break;
+      case 'none':
+        break; // writes nothing; the ask fires again on the next webviewReady
     }
   }
 
@@ -569,19 +574,21 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
         // First-run consent, asked in the app: opening the office is the
         // moment the user can be asked, so the request rides the same
-        // handshake. Dismissing the dialog sends nothing — the request simply
-        // fires again on the next webviewReady (fail-closed re-ask), while
-        // both durable answers (Install / Don't Ask Again) make this guard
-        // false forever. The silent-grant migration never reaches here: it
-        // ran at server start (installHooksIfConsented), so hooksInstalled
-        // is already true for that population.
-        if (!hooksInstalled && hooksEnabled && !readConfig().hooksConsentGiven) {
-          this.webview?.postMessage({
-            type: 'hooksConsentRequest',
-            headline: CONSENT_INSTALL_HEADLINE,
-            disclosure: CONSENT_DISCLOSURE,
-          });
-        }
+        // handshake. consentGate owns every condition (the standalone surface
+        // calls the same function). Dismissing the dialog sends nothing — the
+        // request simply fires again on the next webviewReady (fail-closed
+        // re-ask), while both durable answers make the gate false forever. The
+        // silent-grant migration never reaches here: it ran at server start
+        // (installHooksIfConsented), so hooksInstalled is already true for
+        // that population. An embedded webview is privileged by construction —
+        // it is our own iframe, reached through no socket.
+        const consentRequest = hooksConsentRequest({
+          installed: hooksInstalled,
+          hooksEnabled,
+          consentGiven: readConfig().hooksConsentGiven === true,
+          privileged: true,
+        });
+        if (consentRequest) this.webview?.postMessage(consentRequest);
 
         // Folder→Area mappings (must arrive before any agentCreated/existingAgents
         // so OfficeState.findFreeSeat has the dict when characters are placed).
