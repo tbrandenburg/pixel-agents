@@ -242,7 +242,10 @@ function writeClaudeSettings(settings: ClaudeSettings, expectedRaw: string | nul
   // re-decides on the fresh content, so a commit never outruns a warranted
   // backup. expectedRaw === null keeps the call: a file present NOW was
   // written by someone else, and preserving it costs nothing (the verify
-  // aborts this write anyway).
+  // aborts this write anyway). The re-parse of expectedRaw is required, not
+  // redundant: the object mutateClaudeSettings parsed from it has already
+  // been mutated by the callback — it now holds what we are ABOUT to write,
+  // and this decision must be about what we are REPLACING.
   if (expectedRaw === null || !settingsHoldOnlyOurHooks(parseClaudeSettings(expectedRaw))) {
     backupClaudeSettingsOnce(settingsPath);
   }
@@ -428,7 +431,18 @@ function isOurHook(hook: ClaudeHookEntry['hooks'][number]): boolean {
  *  restore. Every other deviation — an extra top-level key, a
  *  non-empty matcher, an unknown field on an entry or hook, a foreign command,
  *  an event array we would not leave behind — reads as user-authored content,
- *  and the ordinary backup-before-write rule applies. */
+ *  and the ordinary backup-before-write rule applies.
+ *
+ *  "Exactly the shape our installer writes" is checked against the WRITER —
+ *  makeHookEntry() is the reference the fields are compared to — not against a
+ *  second hand-written description of it. A hand-rolled twin drifts: the next
+ *  field added to the entries we write would make this predicate read our own
+ *  fresh output as user content, silently reviving the backup-of-our-own-file
+ *  bug for every install after it. Two fields are exempt from the comparison
+ *  because PAST installs legitimately differ in them: `command` (the script
+ *  path moves between homes and versions — identity is isOurHook, the same
+ *  suffix rule used everywhere else) and `timeout`. Deviation in anything
+ *  else, present or added later, reads as the user's. */
 function settingsHoldOnlyOurHooks(settings: ClaudeSettings): boolean {
   if (Object.keys(settings).some((key) => key !== 'hooks')) return false;
   if (!('hooks' in settings)) return true;
@@ -436,21 +450,26 @@ function settingsHoldOnlyOurHooks(settings: ClaudeSettings): boolean {
   if (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return false;
   }
+  const reference = makeHookEntry() as unknown as Record<string, unknown>;
+  const referenceHook = (reference.hooks as Record<string, unknown>[])[0];
+  const matchesReference = (value: unknown, refValue: unknown): boolean =>
+    JSON.stringify(value) === JSON.stringify(refValue);
   for (const entries of Object.values(hooks)) {
     // An empty event array is not ours: install always fills the key it adds,
     // and uninstall deletes a key its own removal emptied.
     if (!Array.isArray(entries) || entries.length === 0) return false;
     for (const entry of entries) {
       if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
-      if (Object.keys(entry).some((key) => key !== 'matcher' && key !== 'hooks')) return false;
-      if (entry.matcher !== undefined && entry.matcher !== '') return false;
+      for (const [key, value] of Object.entries(entry)) {
+        if (key === 'hooks') continue; // compared hook-by-hook below
+        if (!matchesReference(value, reference[key])) return false;
+      }
       if (!Array.isArray(entry.hooks) || entry.hooks.length === 0) return false;
       for (const hook of entry.hooks) {
-        if (!isOurHook(hook) || hook.type !== 'command') return false;
-        if (
-          Object.keys(hook).some((key) => key !== 'type' && key !== 'command' && key !== 'timeout')
-        ) {
-          return false;
+        if (!isOurHook(hook)) return false;
+        for (const [key, value] of Object.entries(hook)) {
+          if (key === 'command' || key === 'timeout') continue; // vary across installs
+          if (!matchesReference(value, referenceHook[key])) return false;
         }
       }
     }
