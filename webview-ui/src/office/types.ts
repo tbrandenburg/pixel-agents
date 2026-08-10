@@ -227,6 +227,9 @@ export interface Character {
    *  focus. Rendered translucent. Teammates and sub-agents are never headless —
    *  clicking them reaches their lead's / parent's terminal. */
   isHeadless?: boolean;
+  /** The first-run consent greeter: not an agent. Stands still (FSM skipped),
+   *  invisible to hit-testing and palette diversity, never seated or persisted. */
+  isGreeter?: boolean;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */

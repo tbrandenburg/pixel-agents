@@ -4,8 +4,8 @@ import { toMajorMinor } from './changelogData.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
-import type { ConsentChoice } from './components/ConsentModal.js';
-import { ConsentModal } from './components/ConsentModal.js';
+import type { ConsentChoice } from './components/ConsentBubble.js';
+import { ConsentBubble } from './components/ConsentBubble.js';
 import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
@@ -570,9 +570,13 @@ function App() {
       )}
 
       {consentRequest && (
-        <ConsentModal
+        <ConsentBubble
+          officeState={officeState}
           headline={consentRequest.headline}
           disclosure={consentRequest.disclosure}
+          containerRef={containerRef}
+          zoom={editor.zoom}
+          panRef={editor.panRef}
           onChoice={handleConsentChoice}
           onDismiss={dismissConsentRequest}
         />

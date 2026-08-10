@@ -14,6 +14,7 @@ declare global {
         bubbleType: 'permission' | 'waiting' | null;
         waitingAwaitingInput?: boolean;
         isHeadless?: boolean;
+        isGreeter?: boolean;
       }>;
       /** Effective "Display headless as ghosts" setting the renderer is using. */
       getGhostHeadlessAgents?: () => boolean;
@@ -125,6 +126,7 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
       bubbleType: ch.bubbleType,
       waitingAwaitingInput: ch.waitingAwaitingInput,
       isHeadless: ch.isHeadless,
+      isGreeter: ch.isGreeter,
     }));
   };
 
@@ -244,7 +246,7 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
     const os = officeStateRef.current;
     if (!os) return [];
     return Array.from(os.characters.values())
-      .filter((ch) => !ch.isSubagent)
+      .filter((ch) => !ch.isSubagent && !ch.isGreeter)
       .map((ch) => ({
         id: ch.id,
         seatId: ch.seatId,

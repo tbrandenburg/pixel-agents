@@ -5,6 +5,8 @@ import {
   CHARACTER_HIT_HALF_WIDTH,
   CHARACTER_HIT_HEIGHT,
   CHARACTER_SITTING_OFFSET_PX,
+  CONSENT_GREETER_ID,
+  CONSENT_GREETER_TILE_MARGIN,
   DISMISS_BUBBLE_FAST_FADE_SEC,
   FURNITURE_ANIM_INTERVAL_SEC,
   INACTIVE_SEAT_TIMER_MIN_SEC,
@@ -83,6 +85,14 @@ export class OfficeState {
    */
   areaMappings: Record<string, string[]> = {};
 
+  /** World-space point the camera drifts to while the consent greeter is up
+   *  (the bubble overlay recomputes it every frame: the combined center of the
+   *  character and its speech bubble). An explicit cameraFollowId outranks it. */
+  consentCameraTarget: { x: number; y: number } | null = null;
+  /** Latched by a manual pan during the ask: the user took the camera, so the
+   *  overlay's per-frame updates stop re-centering. Reset on spawn/despawn. */
+  private consentCameraCancelled = false;
+
   setAreaMappings(mappings: Record<string, string[]>): void {
     this.areaMappings = mappings;
   }
@@ -160,7 +170,7 @@ export class OfficeState {
 
     // Second pass: assign remaining characters to free seats
     for (const ch of this.characters.values()) {
-      if (ch.seatId) continue;
+      if (ch.seatId || ch.isGreeter) continue; // the greeter never takes a seat
       const seatId = this.findFreeSeat(ch.folderName);
       if (seatId) {
         this.seats.get(seatId)!.assigned = true;
@@ -398,7 +408,7 @@ export class OfficeState {
     const paletteCount = getLoadedCharacterCount();
     const counts = new Array(paletteCount).fill(0) as number[];
     for (const ch of this.characters.values()) {
-      if (ch.isSubagent) continue;
+      if (ch.isSubagent || ch.isGreeter) continue;
       if (ch.palette < paletteCount) counts[ch.palette]++;
     }
     return pickDiversePalette(paletteCount, counts);
@@ -476,6 +486,76 @@ export class OfficeState {
       ch.matrixEffectSeeds = matrixEffectSeeds();
     }
     this.characters.set(id, ch);
+  }
+
+  // ── Consent greeter ───────────────────────────────────────────
+  // The first-run consent ask is diegetic: a char_0 character stands at the
+  // center of the office and "speaks" the disclosure through a DOM bubble
+  // (ConsentBubble). It is not an agent — no seat, no FSM, no hit-testing —
+  // and it despawns the moment the ask is answered or otherwise closed.
+
+  /** Spawn the greeter near the office's bottom-left corner: target tile
+   *  CONSENT_GREETER_TILE_MARGIN in from the left and bottom edges, falling
+   *  back to the closest walkable tile when the target is a seat, furniture,
+   *  a wall, or VOID (seat tiles are in blockedTiles, so closestFreeWalkableTile
+   *  covers every one of those). Idempotent; a remount mid-despawn (StrictMode)
+   *  revives it. */
+  spawnConsentGreeter(): void {
+    this.consentCameraCancelled = false;
+    const existing = this.characters.get(CONSENT_GREETER_ID);
+    if (existing) {
+      if (existing.matrixEffect === 'despawn') {
+        existing.matrixEffect = 'spawn';
+        existing.matrixEffectTimer = 0;
+        existing.matrixEffectSeeds = matrixEffectSeeds();
+      }
+      return;
+    }
+    const spawn = this.closestFreeWalkableTile(
+      CONSENT_GREETER_TILE_MARGIN,
+      this.layout.rows - 1 - CONSENT_GREETER_TILE_MARGIN,
+    );
+    if (!spawn) return; // no walkable tile — ConsentBubble falls back to a fixed panel
+    const ch = createCharacter(CONSENT_GREETER_ID, 0, null, null, 0);
+    ch.isGreeter = true;
+    ch.state = CharacterState.IDLE;
+    ch.isActive = false;
+    ch.dir = Direction.DOWN;
+    ch.x = spawn.col * TILE_SIZE + TILE_SIZE / 2;
+    ch.y = spawn.row * TILE_SIZE + TILE_SIZE / 2;
+    ch.tileCol = spawn.col;
+    ch.tileRow = spawn.row;
+    ch.matrixEffect = 'spawn';
+    ch.matrixEffectTimer = 0;
+    ch.matrixEffectSeeds = matrixEffectSeeds();
+    this.characters.set(CONSENT_GREETER_ID, ch);
+  }
+
+  /** Start the greeter's despawn effect and release the consent camera.
+   *  Idempotent — every close path (answer, Escape, hooksStatus) funnels here. */
+  despawnConsentGreeter(): void {
+    this.consentCameraTarget = null;
+    this.consentCameraCancelled = false;
+    const ch = this.characters.get(CONSENT_GREETER_ID);
+    if (!ch || ch.matrixEffect === 'despawn') return;
+    ch.matrixEffect = 'despawn';
+    ch.matrixEffectTimer = 0;
+    ch.matrixEffectSeeds = matrixEffectSeeds();
+  }
+
+  getConsentGreeter(): Character | null {
+    return this.characters.get(CONSENT_GREETER_ID) ?? null;
+  }
+
+  /** Per-frame update from the bubble overlay; ignored once the user panned. */
+  setConsentCameraTarget(p: { x: number; y: number }): void {
+    if (!this.consentCameraCancelled) this.consentCameraTarget = p;
+  }
+
+  /** Manual pan during the ask: stop re-centering until the next spawn. */
+  cancelConsentCamera(): void {
+    this.consentCameraTarget = null;
+    this.consentCameraCancelled = true;
   }
 
   removeAgent(id: number): void {
@@ -1050,6 +1130,9 @@ export class OfficeState {
         continue; // skip normal FSM while effect is active
       }
 
+      // The consent greeter stands still: no wandering, no seat-seeking.
+      if (ch.isGreeter) continue;
+
       // Temporarily unblock own seat so character can pathfind to it
       this.withOwnSeatUnblocked(ch, () =>
         updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
@@ -1094,6 +1177,8 @@ export class OfficeState {
     for (const ch of chars) {
       // Skip characters that are despawning
       if (ch.matrixEffect === 'despawn') continue;
+      // The consent greeter is not clickable/hoverable — clicks pass through.
+      if (ch.isGreeter) continue;
       // Character sprite is 16x24, anchored bottom-center
       // Apply sitting offset to match visual position
       const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;

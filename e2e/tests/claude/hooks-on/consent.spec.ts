@@ -14,11 +14,13 @@ import { getSettingChecked, setSettings } from '../../../helpers/webview';
  * without the key parses to false (server/src/configPersistence.ts), which is
  * exactly what a real first run looks like.
  *
- * The dialog is rendered IN THE APP — the webview's ConsentModal, driven by
- * the server's `hooksConsentRequest` during the webviewReady handshake — so
- * these specs address it inside the Pixel Agents frame, not in VS Code chrome.
- * Both surfaces (VS Code webview and standalone browser) render this same
- * component off the same message; the standalone side is pinned in
+ * The ask is rendered IN THE APP, diegetically: a greeter character stands at
+ * the center of the office and the webview's ConsentBubble — its speech
+ * bubble, driven by the server's `hooksConsentRequest` during the webviewReady
+ * handshake — carries the disclosure and the three buttons. These specs
+ * address it inside the Pixel Agents frame, not in VS Code chrome. Both
+ * surfaces (VS Code webview and standalone browser) render this same component
+ * off the same message; the standalone side is pinned in
  * e2e/tests/standalone/hooks.spec.ts.
  *
  * The gate is the answer to a 1-star Marketplace review: Pixel Agents replaced
@@ -33,10 +35,22 @@ const NO_CONSENT_CONFIG = {
   // hooksConsentGiven deliberately absent -> parses to false -> dialog shows.
 };
 
-/** The in-app consent dialog. ConsentModal is the only role="dialog" element
+/** The in-app consent ask. ConsentBubble is the only role="dialog" element
  *  in the webview (the Settings/changelog modals don't carry the role). */
 function consentDialog(frame: Frame): Locator {
   return frame.getByRole('dialog');
+}
+
+type GreeterHooks = {
+  getCharacters?: () => Array<{ isGreeter?: boolean }>;
+};
+
+/** Whether the consent greeter character is currently in the office. */
+function greeterPresent(frame: Frame): Promise<boolean> {
+  return frame.evaluate(() => {
+    const hooks = (window as { __pixelAgentsTestHooks?: GreeterHooks }).__pixelAgentsTestHooks;
+    return (hooks?.getCharacters?.() ?? []).some((c) => c.isGreeter === true);
+  });
 }
 
 /** Wait for the first-run consent dialog and return it. */
@@ -143,29 +157,41 @@ test.describe('Hooks consent gate', () => {
 
     // The disclosure is the point: what is written, what data moves, how to undo.
     const text = (await dialog.textContent()) ?? '';
-    expect(text).toMatch(/needs to add its hooks/);
+    expect(text).toContain('Welcome to Pixel Agents!');
+    expect(text).toMatch(/adds hooks for 12 Claude Code events/);
     expect(text).toContain('~/.claude/settings.json');
-    expect(text).toMatch(/12 Claude Code events/);
     expect(text).toContain('.pixel-agents.backup');
     expect(text).toMatch(/tool inputs/);
     expect(text).toContain('127.0.0.1');
     // The LAST sentence of the disclosure — asserted at the tail so a clipped
     // or half-rendered body fails here rather than passing on its opening.
     expect(text).toContain('Instant Detection (Hooks)');
-    narrator.check('dialog discloses event scope, payload destination, and how to remove');
+    narrator.check('bubble discloses event scope, payload destination, and how to remove');
 
-    // Unmissable is the whole reason this is a modal: it rides a full-surface
-    // overlay that takes the office's pointer events, so it cannot be ignored
-    // the way a toast can. The overlay is the dialog's parent element.
-    const overlayBox = await dialog.locator('..').boundingBox();
-    const viewport = await frame.evaluate(() => ({
-      w: globalThis.innerWidth,
-      h: globalThis.innerHeight,
-    }));
-    expect(overlayBox).not.toBeNull();
-    expect(overlayBox!.width).toBeGreaterThanOrEqual(viewport.w - 2);
-    expect(overlayBox!.height).toBeGreaterThanOrEqual(viewport.h - 2);
-    narrator.check('the dialog overlays the whole office — it cannot be dismissed by ignoring it');
+    // Diegetic: the ask is a greeter character's speech bubble, and the camera
+    // shifts so character + bubble are centered — the bubble ends up FULLY on
+    // screen (polled, because the camera lerps there over a few frames). That
+    // is what makes it unmissable without an office-blocking overlay.
+    expect(await greeterPresent(frame)).toBe(true);
+    await expect
+      .poll(
+        () =>
+          frame.evaluate(() => {
+            const el = document.querySelector('[role="dialog"]');
+            if (!el) return false;
+            const r = el.getBoundingClientRect();
+            return (
+              r.width > 0 &&
+              r.left >= 0 &&
+              r.top >= 0 &&
+              r.right <= window.innerWidth &&
+              r.bottom <= window.innerHeight
+            );
+          }),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+    narrator.check('a greeter character speaks the ask; the camera centers it fully on screen');
 
     // THREE buttons, and exactly these three. The native predecessor of this
     // dialog once shipped a synthesized fourth Cancel that did precisely what
@@ -184,6 +210,9 @@ test.describe('Hooks consent gate', () => {
     narrator.step('clicking Install Hooks');
     await dialog.getByRole('button', { name: 'Install Hooks' }).click();
     await expect(dialog).toBeHidden({ timeout: 15_000 });
+    // Answering the ask despawns the greeter (matrix effect, then removal).
+    await expect.poll(() => greeterPresent(frame), { timeout: 15_000 }).toBe(false);
+    narrator.check('the greeter despawned once the ask was answered');
 
     await expect.poll(() => ourHookEvents(tmpHome).length, { timeout: 15_000 }).toBe(12);
     expect(ourHookEvents(tmpHome)).not.toContain('UserPromptSubmit');
@@ -274,27 +303,29 @@ test.describe('Hooks consent gate', () => {
     narrator.check('settings.json never created, consent ungranted, hooks-off not persisted');
   });
 
-  // A stray click on the office behind the dialog must not read as an answer —
+  // A stray click on the office around the bubble must not read as an answer —
   // OR as a dismissal. This is a decision surface: only the three buttons and
-  // Escape do anything at all. A backdrop that dismissed on click would make
-  // the most common accidental gesture (clicking where the office was) close
-  // a consent dialog the user never read.
-  test('clicking the backdrop neither answers nor dismisses @area:cross-cutting', async ({
+  // Escape do anything at all. The office is live behind the ask (that is the
+  // point of the diegetic bubble), so the most common accidental gesture —
+  // clicking somewhere in the office — must leave the ask exactly where it was.
+  test('clicking the office around the bubble neither answers nor dismisses @area:cross-cutting', async ({
     pixelAgents,
   }) => {
     const { frame, tmpHome, narrator } = pixelAgents;
 
     const dialog = await openConsentDialog(frame);
 
-    narrator.step('clicking the darkened office behind the dialog');
-    await dialog.locator('..').click({ position: { x: 5, y: 5 } });
+    narrator.step('clicking the office beside the greeter');
+    // Top-left corner of the canvas — away from the centered character+bubble.
+    // force: the click targets the canvas even if some overlay pixel intercepts.
+    await frame.locator('canvas').click({ position: { x: 8, y: 8 }, force: true });
     await frame.page().waitForTimeout(1_000);
 
     await expect(dialog).toBeVisible();
     expect(fs.existsSync(settingsPath(tmpHome))).toBe(false);
     expect(readConsent(tmpHome)).toBe(false);
     expect(readHooksEnabled(tmpHome)).not.toBe(false);
-    narrator.check('dialog still open, nothing written — a stray click is not an answer');
+    narrator.check('bubble still open, nothing written — a stray click is not an answer');
   });
 });
 
