@@ -5,6 +5,10 @@ import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './a
 import { readConfig, writeConfig } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import {
+  CONSENT_DISCLOSURE,
+  CONSENT_INSTALL_HEADLINE,
+} from './providers/hook/claude/consentCopy.js';
 import { claudeProvider } from './providers/index.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
@@ -182,22 +186,41 @@ export function handleClientMessage(
           .then((installed) => send({ type: 'hooksStatus', installed }));
         break;
       }
-      // The preference is persisted only AFTER the side effect settles, and
-      // only when it agrees. Writing it first strands the user when the
-      // uninstall fails: the entries stay on disk and keep firing, while the
-      // persisted hooks-off makes the next startup skip the consent/install
-      // path entirely — never asked again, no route left to remove them.
-      void (async () => {
-        await ctx.onSetHooksEnabled?.(enabled);
-        const installed = await claudeProvider.areHooksInstalled();
-        if (installed === enabled) {
-          adapter?.setSetting(KEY_HOOKS_ENABLED, enabled);
-          if (runtime) runtime.hooksEnabled.current = enabled;
-        }
-        // Always report the ACTUAL install state — the toggle expresses intent,
-        // not outcome (the installer refuses to touch an unparseable file).
-        send({ type: 'hooksStatus', installed });
-      })();
+      void applyHooksPreference(ctx, send, enabled);
+      break;
+    }
+
+    case 'hooksConsentResponse': {
+      // Fail-closed on both axes. Privilege: the consent request is only ever
+      // sent to tokened connections, so a response from an untokened one is a
+      // crafted message — ignored, same reasoning as setHooksEnabled above.
+      // Choice: only an exact 'install' or 'never' writes anything; 'notNow'
+      // and every unrecognized value fall through to writing NOTHING and
+      // asking again on the next connect — a malformed choice must never be
+      // read as approval.
+      if (!ctx.privileged) {
+        console.warn(
+          '[Pixel Agents] Ignoring hooksConsentResponse from an untokened client — installing hooks needs approval from this machine (open the tokened URL the CLI printed).',
+        );
+        break;
+      }
+      if (msg.choice === 'install') {
+        // Clicking Install IS the consent grant: onSetHooksEnabled(true) calls
+        // grantHooksConsent() before installing (cli.ts), exactly like the
+        // Settings toggle.
+        void applyHooksPreference(ctx, send, true);
+      } else if (msg.choice === 'never') {
+        // Persist hooks-off WITHOUT touching ~/.claude/settings.json — the
+        // dialog only shows when nothing of ours is installed, so there is
+        // nothing to uninstall and no reason to route through the installer.
+        adapter?.setSetting(KEY_HOOKS_ENABLED, false);
+        if (runtime) runtime.hooksEnabled.current = false;
+        console.log('[Pixel Agents] Hooks disabled. Re-enable them any time in the UI settings.');
+      } else {
+        console.log(
+          '[Pixel Agents] Skipping hook install for this run — you will be asked again next time.',
+        );
+      }
       break;
     }
 
@@ -251,6 +274,33 @@ export function handleClientMessage(
       // require IDE-specific handling (not yet implemented for standalone)
       break;
   }
+}
+
+/**
+ * Run the hooks install/uninstall side effect, then persist the preference —
+ * only AFTER the side effect settled, and only when the on-disk result agrees.
+ * Writing it first strands the user when the uninstall fails: the entries stay
+ * on disk and keep firing, while the persisted hooks-off makes the next
+ * startup skip the consent/install path entirely — never asked again, no
+ * route left to remove them.
+ *
+ * Shared by the Settings toggle and the consent dialog's Install button; both
+ * are consent grants (onSetHooksEnabled(true) calls grantHooksConsent()).
+ */
+async function applyHooksPreference(
+  ctx: ClientMessageContext,
+  send: WsSend,
+  enabled: boolean,
+): Promise<void> {
+  await ctx.onSetHooksEnabled?.(enabled);
+  const installed = await claudeProvider.areHooksInstalled();
+  if (installed === enabled) {
+    ctx.store.getAdapter()?.setSetting(KEY_HOOKS_ENABLED, enabled);
+    if (ctx.runtime) ctx.runtime.hooksEnabled.current = enabled;
+  }
+  // Always report the ACTUAL install state — the toggle expresses intent,
+  // not outcome (the installer refuses to touch an unparseable file).
+  send({ type: 'hooksStatus', installed });
 }
 
 function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
@@ -326,6 +376,25 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // assumption until it arrives.
   void claudeProvider.areHooksInstalled().then((installed) => {
     send({ type: 'hooksStatus', installed });
+    // 4a-bis. First-run consent, asked in the app: when the preference is on
+    // but consent was never recorded and nothing of ours is installed, this
+    // connect is the moment the user can be asked. Privileged connections
+    // only — an untokened spectator's answer would be ignored (see
+    // hooksConsentResponse above), so showing it the dialog is a lie. The
+    // consent flag is re-read here, not taken from the handshake: another
+    // tab may have answered while this one was loading. Dismissing the
+    // dialog client-side sends nothing, so the request simply fires again
+    // on the next connect — fail-closed, never nagging within a session.
+    if (!installed && ctx.privileged && readConfig().hooksConsentGiven !== true) {
+      const hooksOn = adapter?.getSetting(KEY_HOOKS_ENABLED, true) ?? true;
+      if (hooksOn) {
+        send({
+          type: 'hooksConsentRequest',
+          headline: CONSENT_INSTALL_HEADLINE,
+          disclosure: CONSENT_DISCLOSURE,
+        });
+      }
+    }
   });
 
   // 4b. Folder→Area mappings (must arrive before existingAgents so the

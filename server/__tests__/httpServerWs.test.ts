@@ -240,10 +240,11 @@ describe('/ws connection gate', () => {
  * the token, because the token reaches the SPA only through the URL the CLI
  * printed in the operator's own terminal.
  *
- * Every test below sends the real `setHooksEnabled` message and asserts on the
- * install seam plus the on-disk consent flag. The socket stays OPEN throughout —
- * a tokenless viewer keeps watching the office; it just cannot approve a change
- * to a file in someone's home directory.
+ * Every test below sends a real consent-bearing message (`setHooksEnabled`, or
+ * the consent dialog's `hooksConsentResponse`) and asserts on the install seam
+ * plus the on-disk consent flag. The socket stays OPEN throughout — a tokenless
+ * viewer keeps watching the office; it just cannot approve a change to a file
+ * in someone's home directory.
  */
 describe('/ws privileged-message gate', () => {
   let server: InstanceType<typeof PixelAgentsServer>;
@@ -397,6 +398,62 @@ describe('/ws privileged-message gate', () => {
     sockets.push(result.socket);
 
     await sendToggle(result.socket, true);
+    expect(sideEffects).toEqual([true]);
+    expect(readHooksConsent()).toBe(true);
+  });
+
+  // ── The in-app consent dialog rides the same privilege boundary ──
+
+  // The first-run ask is solicited by the server during the webviewReady
+  // handshake, and only where the answer could be honored: a tokened client.
+  it('sends hooksConsentRequest on the tokened handshake', async () => {
+    const { port, token } = await startStandalone();
+
+    const result = await connectTo(
+      `ws://127.0.0.1:${port.toString()}/ws?token=${encodeURIComponent(token)}`,
+      { Origin: `http://127.0.0.1:${port.toString()}` },
+    );
+    sockets.push(result.socket);
+
+    const request = waitForMessage(result.socket, 'hooksConsentRequest');
+    result.socket.send(JSON.stringify({ type: 'webviewReady' }));
+    expect(await request).toMatchObject({ type: 'hooksConsentRequest' });
+  });
+
+  // An untokened spectator is never shown the dialog — its answer would be
+  // ignored — and a crafted approval from it changes nothing on disk.
+  it('withholds hooksConsentRequest from an untokened connection and ignores its approval', async () => {
+    const { port } = await startStandalone();
+
+    const result = await connectTo(`ws://127.0.0.1:${port.toString()}/ws`, {
+      Origin: `http://127.0.0.1:${port.toString()}`,
+    });
+    sockets.push(result.socket);
+    expect(result.accepted).toBe(true);
+
+    const request = waitForMessage(result.socket, 'hooksConsentRequest');
+    result.socket.send(JSON.stringify({ type: 'webviewReady' }));
+    expect(await request).toBeNull();
+
+    result.socket.send(JSON.stringify({ type: 'hooksConsentResponse', choice: 'install' }));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(sideEffects).toEqual([]);
+    expect(readHooksConsent()).toBe(false);
+  });
+
+  // The route the dialog exists for: the tokened SPA's Install button grants
+  // consent and runs the install, end to end over the real wire.
+  it('accepts the tokened dialog approval: install runs and consent is granted', async () => {
+    const { port, token } = await startStandalone();
+
+    const result = await connectTo(
+      `ws://127.0.0.1:${port.toString()}/ws?token=${encodeURIComponent(token)}`,
+      { Origin: `http://127.0.0.1:${port.toString()}` },
+    );
+    sockets.push(result.socket);
+
+    result.socket.send(JSON.stringify({ type: 'hooksConsentResponse', choice: 'install' }));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     expect(sideEffects).toEqual([true]);
     expect(readHooksConsent()).toBe(true);
   });

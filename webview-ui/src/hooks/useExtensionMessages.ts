@@ -94,6 +94,13 @@ interface ExtensionMessageState {
    *  consent is pending, unlike hooksEnabled which defaults true. */
   hooksInstalled: boolean;
   hooksInfoShown: boolean;
+  /** First-run consent ask (hooksConsentRequest message). Non-null while the
+   *  server is waiting on an answer; carries the server's exact disclosure
+   *  copy so the modal renders the terms being approved, with no client-side
+   *  duplicate to drift. Cleared locally on answer/dismissal, and by a
+   *  hooksStatus installed=true (another surface or tab already installed). */
+  consentRequest: { headline: string; disclosure: string } | null;
+  dismissConsentRequest: () => void;
   // Areas
   areaMappings: Record<string, string[]>;
   setAreaMappings: (m: Record<string, string[]>) => void;
@@ -139,6 +146,10 @@ export function useExtensionMessages(
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInstalled, setHooksInstalled] = useState(false);
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
+  const [consentRequest, setConsentRequest] = useState<{
+    headline: string;
+    disclosure: string;
+  } | null>(null);
   const [areaMappings, setAreaMappings] = useState<Record<string, string[]>>({});
   const [showAreas, setShowAreas] = useState(false);
 
@@ -665,6 +676,16 @@ export function useExtensionMessages(
       } else if (msg.type === 'hooksStatus') {
         if (typeof msg.installed === 'boolean') {
           setHooksInstalled(msg.installed as boolean);
+          if (msg.installed) {
+            // The ask is moot once hooks are installed — the Settings toggle
+            // or another connected tab granted consent while this dialog was
+            // open. Close it instead of letting a stale approval re-install.
+            setConsentRequest(null);
+          }
+        }
+      } else if (msg.type === 'hooksConsentRequest') {
+        if (typeof msg.headline === 'string' && typeof msg.disclosure === 'string') {
+          setConsentRequest({ headline: msg.headline, disclosure: msg.disclosure });
         }
       } else if (msg.type === 'externalAssetDirectoriesUpdated') {
         if (Array.isArray(msg.dirs)) {
@@ -741,6 +762,8 @@ export function useExtensionMessages(
     hooksInstalled,
     setHooksEnabled,
     hooksInfoShown,
+    consentRequest,
+    dismissConsentRequest: useCallback(() => setConsentRequest(null), []),
     areaMappings,
     setAreaMappings,
     showAreas,

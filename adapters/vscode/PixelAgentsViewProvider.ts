@@ -215,7 +215,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         const hooksEnabled = this.adapter.getSetting<boolean>(GLOBAL_KEY_HOOKS_ENABLED, true);
         this.runtime.hooksEnabled.current = hooksEnabled;
         if (hooksEnabled) {
-          void this.installHooksWithConsent(config.port, config.token);
+          void this.installHooksIfConsented(config.port, config.token);
         }
         console.log(`[Pixel Agents] Server: ready on port ${config.port}`);
       })
@@ -323,75 +323,59 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
    *  user has approved it once (persisted in config.json, shared with the
    *  standalone CLI).
    *
-   *  It asks exactly one population: the one with NOTHING of ours installed.
-   *  With our hooks ALREADY present but no recorded consent — a pre-consent
-   *  version installed them silently — consent is granted here and the install
-   *  runs with no prompt at all. That install is the 14 -> 12 migration, and it
-   *  only ever REDUCES scope: it drops UserPromptSubmit and TaskCreated, the two
-   *  events that forwarded prompt text and were consumed by nothing. Nothing
-   *  this user already had is expanded, so the friction of a prompt buys them
-   *  nothing they do not already have. (This is deliberately NOT the general
-   *  rule: consent for a fresh install is still asked for, in full, below.)
+   *  The dialog itself lives in the WEBVIEW, not in a native modal: the
+   *  webviewReady handler sends a `hooksConsentRequest` and the app renders
+   *  the same consent modal the standalone browser shows, so both surfaces
+   *  ask on identical terms with one rendering. This method therefore only
+   *  handles the two populations that are NOT asked:
    *
-   *  A BLOCKING MODAL, not a notification: this is the one decision that must
-   *  not be missable. A notification can be ignored or auto-hidden to the bell
-   *  and the write it authorizes never questioned again; a modal cannot. The
-   *  headline is the first argument and the full disclosure is `detail` —
-   *  VS Code renders `detail` only for modal messages (MessageOptions), so the
-   *  facts reach the decision surface as the modal's body.
+   *  - Consent already recorded → install straight away.
+   *  - Our hooks ALREADY present but no recorded consent — a pre-consent
+   *    version installed them silently — consent is granted here and the
+   *    install runs with no prompt at all. That install is the 14 -> 12
+   *    migration, and it only ever REDUCES scope: it drops UserPromptSubmit
+   *    and TaskCreated, the two events that forwarded prompt text and were
+   *    consumed by nothing. Nothing this user already had is expanded, so the
+   *    friction of a prompt buys them nothing they do not already have.
+   *    (This is deliberately NOT the general rule: consent for a fresh
+   *    install is still asked for, in full, in the app.)
    *
-   *  THREE buttons, because "Not Now" is also the close affordance. VS Code
-   *  synthesizes its own Cancel button only when no item claims that role
-   *  (MainThreadMessageService._showModalMessage), and passing three bare
-   *  strings did exactly that: the synthesized Cancel resolved to `undefined`
-   *  and took the Not Now path — a fourth button that did, precisely, what the
-   *  third one did. Marking "Not Now" as the close affordance makes VS Code use
-   *  it AS the cancel button instead of inventing a duplicate.
-   *
-   *  Dismissal still writes nothing, but it no longer arrives as `undefined`.
-   *  Escape resolves through the dialog's cancelId to the close-affordance
-   *  ITEM, so a dismissal now returns the "Not Now" object; `undefined` remains
-   *  reachable (a dialog torn down without an answer). Both are handled by the
-   *  same fail-closed shape below: only an exact match writes, so anything
-   *  else — either dismissal form included — falls through to writing NOTHING
-   *  and asking again next startup. Only "Don't Ask Again" persists hooks-off. */
-  private async installHooksWithConsent(port: number, token: string): Promise<void> {
+   *  The fresh-install population gets nothing here — the ask happens when
+   *  the office is opened, which also means hooks are not installed until the
+   *  panel is first viewed. Fail-closed by construction: no answer, no write. */
+  private async installHooksIfConsented(port: number, token: string): Promise<void> {
     if (!readConfig().hooksConsentGiven) {
-      if (await claudeProvider.areHooksInstalled()) {
-        // Already installed and already firing: grant and migrate silently.
-        grantHooksConsent();
-      } else {
-        // One MessageItem per button, matched by REFERENCE below. The overloads
-        // are homogeneous (`T extends string` | `T extends MessageItem`), so
-        // marking one item forces all three — and identity matching keeps each
-        // title a single literal, with no second copy to drift out of sync.
-        const install = { title: 'Install Hooks' };
-        // `satisfies` is the typo guard on the one property carrying the whole
-        // point of this shape: inference would accept `isCloseAffordence` as
-        // just another field and silently restore the duplicate button.
-        const notNow = {
-          title: 'Not Now',
-          isCloseAffordance: true,
-        } satisfies vscode.MessageItem;
-        const dontAskAgain = { title: "Don't Ask Again" };
-        const choice = await vscode.window.showInformationMessage(
-          CONSENT_INSTALL_HEADLINE,
-          { modal: true, detail: CONSENT_DISCLOSURE },
-          install,
-          notNow,
-          dontAskAgain,
-        );
-        if (choice !== install) {
-          if (choice === dontAskAgain) {
-            this.adapter.setSetting(GLOBAL_KEY_HOOKS_ENABLED, false);
-            this.runtime.hooksEnabled.current = false;
-          }
-          return;
-        }
-        grantHooksConsent();
+      if (!(await claudeProvider.areHooksInstalled())) {
+        return; // fresh install — the webview consent dialog owns this ask
       }
+      // Already installed and already firing: grant and migrate silently.
+      grantHooksConsent();
     }
     await this.installHooksAndScript(port, token);
+  }
+
+  /** The webview consent dialog's answer. Fail-closed on exact matches, the
+   *  same shape the native modal enforced by object identity: only 'install'
+   *  grants consent and installs, only 'never' persists hooks-off, and every
+   *  other value — 'notNow', a dismissal that never sends, a malformed
+   *  message — writes NOTHING and the dialog simply shows again on the next
+   *  webviewReady. A typo must never be read as approval. */
+  private async handleHooksConsentResponse(choice: unknown): Promise<void> {
+    if (choice === 'install') {
+      // Clicking Install IS the consent grant, exactly like the Settings
+      // toggle — mirror setHooksEnabled, including the shrug at getConfig()
+      // being undefined while the server is still starting: the Claude
+      // provider ignores both arguments (the hook script discovers the
+      // server through ~/.pixel-agents/server.json at runtime).
+      grantHooksConsent();
+      const serverConfig = this.pixelAgentsServer?.getConfig();
+      await this.installHooksAndScript(serverConfig?.port, serverConfig?.token);
+    } else if (choice === 'never') {
+      // Persist hooks-off WITHOUT touching ~/.claude/settings.json — the
+      // dialog only shows when nothing of ours is installed.
+      this.adapter.setSetting(GLOBAL_KEY_HOOKS_ENABLED, false);
+      this.runtime.hooksEnabled.current = false;
+    }
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
@@ -471,6 +455,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         this.adapter.setSetting(GLOBAL_KEY_GHOST_HEADLESS_AGENTS, message.enabled);
       } else if (message.type === 'setHooksEnabled') {
         void this.setHooksEnabled(message.enabled as boolean);
+      } else if (message.type === 'hooksConsentResponse') {
+        void this.handleHooksConsentResponse(message.choice);
       } else if (message.type === 'setHooksInfoShown') {
         this.adapter.setSetting(GLOBAL_KEY_HOOKS_INFO_SHOWN, true);
       } else if (message.type === 'setShowAreas') {
@@ -578,10 +564,24 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
         // Actual install state, distinct from the hooksEnabled preference —
         // hooksEnabled defaults true while first-run consent is still pending.
-        this.webview?.postMessage({
-          type: 'hooksStatus',
-          installed: await claudeProvider.areHooksInstalled(),
-        });
+        const hooksInstalled = await claudeProvider.areHooksInstalled();
+        this.webview?.postMessage({ type: 'hooksStatus', installed: hooksInstalled });
+
+        // First-run consent, asked in the app: opening the office is the
+        // moment the user can be asked, so the request rides the same
+        // handshake. Dismissing the dialog sends nothing — the request simply
+        // fires again on the next webviewReady (fail-closed re-ask), while
+        // both durable answers (Install / Don't Ask Again) make this guard
+        // false forever. The silent-grant migration never reaches here: it
+        // ran at server start (installHooksIfConsented), so hooksInstalled
+        // is already true for that population.
+        if (!hooksInstalled && hooksEnabled && !readConfig().hooksConsentGiven) {
+          this.webview?.postMessage({
+            type: 'hooksConsentRequest',
+            headline: CONSENT_INSTALL_HEADLINE,
+            disclosure: CONSENT_DISCLOSURE,
+          });
+        }
 
         // Folder→Area mappings (must arrive before any agentCreated/existingAgents
         // so OfficeState.findFreeSeat has the dict when characters are placed).

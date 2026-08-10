@@ -112,6 +112,7 @@ components:
         # Settings & config
         - $ref: '#/components/schemas/SettingsLoaded'
         - $ref: '#/components/schemas/HooksStatus'
+        - $ref: '#/components/schemas/HooksConsentRequest'
         - $ref: '#/components/schemas/ExternalAssetDirectoriesUpdated'
         - $ref: '#/components/schemas/AreaMappingsLoaded'
         - $ref: '#/components/schemas/WorkspaceFolders'
@@ -132,6 +133,7 @@ components:
         - $ref: '#/components/schemas/SetAlwaysShowLabels'
         - $ref: '#/components/schemas/SetGhostHeadlessAgents'
         - $ref: '#/components/schemas/SetHooksEnabled'
+        - $ref: '#/components/schemas/HooksConsentResponse'
         - $ref: '#/components/schemas/SetHooksInfoShown'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/ExportLayout'
@@ -684,6 +686,33 @@ components:
         installed:
           type: boolean
 
+    HooksConsentRequest:
+      description: |
+        Ask this client to run the first-run hooks consent dialog. Sent during the
+        `webviewReady` handshake when the hooks preference is on, consent has not
+        been recorded, and nothing of ours is installed — and, in standalone, only
+        on privileged (tokened) connections, since an untokened spectator could not
+        act on it anyway (its `hooksConsentResponse` would be ignored).
+
+        Carries the disclosure copy so the client renders the server's exact terms
+        (consentCopy.ts, shared with no client-side duplicate to drift). The client
+        answers with `hooksConsentResponse`; dismissing the dialog sends nothing
+        and the request fires again on the next connect.
+      type: object
+      additionalProperties: false
+      required: [type, headline, disclosure]
+      properties:
+        type:
+          const: hooksConsentRequest
+        headline:
+          type: string
+          description: One-sentence summary of what is being approved.
+        disclosure:
+          type: string
+          description: |
+            Full disclosure body (what is written, what data moves, how to undo),
+            paragraphs separated by blank lines.
+
     AreaMappingsLoaded:
       description: |
         Workspace-folder-to-Area mappings. Folder names map to one or more Area
@@ -867,6 +896,31 @@ components:
           const: setHooksEnabled
         enabled:
           type: boolean
+
+    HooksConsentResponse:
+      description: |
+        The user's answer to `hooksConsentRequest`. Only an exact `install` grants
+        consent and installs; only an exact `never` persists hooks-off (without
+        touching ~/.claude/settings.json — nothing of ours is installed when this
+        dialog shows). `notNow` and any unrecognized value write NOTHING and the
+        user is asked again on the next connect — a malformed choice must never be
+        read as approval. The server ignores this message on unprivileged
+        standalone connections, which were never sent the request.
+      type: object
+      additionalProperties: false
+      required: [type, choice]
+      properties:
+        type:
+          const: hooksConsentResponse
+        choice:
+          $ref: '#/components/schemas/HooksConsentChoice'
+
+    HooksConsentChoice:
+      description: >-
+        The three consent outcomes. Receivers must treat any other value exactly
+        like notNow: write nothing, ask again.
+      type: string
+      enum: [install, notNow, never]
 
     SetHooksInfoShown:
       type: object

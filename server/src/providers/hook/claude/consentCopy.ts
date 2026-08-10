@@ -1,12 +1,13 @@
 /**
- * Disclosure text for the hooks consent gate, shared by both surfaces (the VS
- * Code modal and the standalone CLI prompt) so neither can drift into asking
- * for approval on weaker terms than the other.
+ * Disclosure text for the hooks consent gate. Both surfaces show the SAME
+ * in-app dialog: the server ships these strings in the `hooksConsentRequest`
+ * message and the webview's ConsentModal renders them verbatim, so there is
+ * exactly one copy of the terms and no client-side duplicate to drift into
+ * asking for approval on weaker terms.
  *
- * Two pieces, because a VS Code modal has two slots: the HEADLINE is the
- * message argument (rendered bold) and the DISCLOSURE is `detail` (the body).
- * The CLI joins them itself. Both surfaces must render both pieces — every
- * disclosure fact lives in one or the other, never in a surface's own copy.
+ * Two pieces: the HEADLINE is the dialog's title and the DISCLOSURE is its
+ * body. Every disclosure fact lives in one or the other, never in a surface's
+ * own copy.
  *
  * The event count is interpolated from CLAUDE_HOOK_EVENTS, never written out:
  * a hardcoded number silently becomes a lie the next time the list changes.
@@ -48,11 +49,10 @@ export const CONSENT_INSTALL_HEADLINE =
 
 /** The three disclosure facts, in order, as one block.
  *
- *  This is the modal's `detail` and the body of the CLI prompt. VS Code sets it
- *  with `innerText` and applies no length cap to a dialog's detail (verified in
- *  the pinned 1.129.1 bundle), so the block renders in full with its paragraph
- *  breaks intact — no "Details" affordance, which would put the disclosure one
- *  click away from the decision it is there to inform. */
+ *  This is the dialog's body. The ConsentModal splits it on the blank lines
+ *  and renders every paragraph in full on the decision surface itself — no
+ *  "Details" affordance, which would put the disclosure one click away from
+ *  the decision it is there to inform. */
 export const CONSENT_DISCLOSURE = [
   CONSENT_FACT_WHAT,
   CONSENT_FACT_DATA,

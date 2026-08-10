@@ -4,6 +4,8 @@ import { toMajorMinor } from './changelogData.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
+import type { ConsentChoice } from './components/ConsentModal.js';
+import { ConsentModal } from './components/ConsentModal.js';
 import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
@@ -87,6 +89,8 @@ function App() {
     hooksEnabled,
     hooksInstalled,
     hooksInfoShown,
+    consentRequest,
+    dismissConsentRequest,
     areaMappings,
     setAreaMappings,
     showAreas,
@@ -140,6 +144,17 @@ function App() {
   const handleSelectAgent = useCallback((id: number) => {
     transport.send({ type: 'focusAgent', id });
   }, []);
+
+  // Answer the first-run hooks consent dialog. The buttons send their exact
+  // choice; dismissal (Escape) goes through dismissConsentRequest alone and
+  // sends nothing, so the server asks again on the next open.
+  const handleConsentChoice = useCallback(
+    (choice: ConsentChoice) => {
+      transport.send({ type: 'hooksConsentResponse', choice });
+      dismissConsentRequest();
+    },
+    [dismissConsentRequest],
+  );
 
   // Mutate folder→Area mappings locally + send to server. Updates OfficeState in
   // the same tick so a follow-up agentCreated picks up the new mapping.
@@ -552,6 +567,15 @@ function App() {
 
       {showMigrationNotice && (
         <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
+      )}
+
+      {consentRequest && (
+        <ConsentModal
+          headline={consentRequest.headline}
+          disclosure={consentRequest.disclosure}
+          onChoice={handleConsentChoice}
+          onDismiss={dismissConsentRequest}
+        />
       )}
     </div>
   );

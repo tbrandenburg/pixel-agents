@@ -34,6 +34,7 @@ export type ServerMessage =
   | CarpetTilesLoaded
   | SettingsLoaded
   | HooksStatus
+  | HooksConsentRequest
   | ExternalAssetDirectoriesUpdated
   | AreaMappingsLoaded
   | WorkspaceFolders
@@ -51,6 +52,7 @@ export type ClientMessage =
   | SetAlwaysShowLabels
   | SetGhostHeadlessAgents
   | SetHooksEnabled
+  | HooksConsentResponse
   | SetHooksInfoShown
   | SetWatchAllSessions
   | ExportLayout
@@ -280,6 +282,12 @@ export interface HooksStatus {
   installed: boolean;
 }
 
+export interface HooksConsentRequest {
+  type: 'hooksConsentRequest';
+  headline: string;
+  disclosure: string;
+}
+
 export interface ExternalAssetDirectoriesUpdated {
   type: 'externalAssetDirectoriesUpdated';
   dirs: string[];
@@ -365,6 +373,13 @@ export interface SetHooksEnabled {
   type: 'setHooksEnabled';
   enabled: boolean;
 }
+
+export interface HooksConsentResponse {
+  type: 'hooksConsentResponse';
+  choice: HooksConsentChoice;
+}
+
+export type HooksConsentChoice = 'install' | 'notNow' | 'never';
 
 export interface SetHooksInfoShown {
   type: 'setHooksInfoShown';
