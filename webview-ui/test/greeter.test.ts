@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
-import { CONSENT_GREETER_ID, CONSENT_GREETER_TILE_MARGIN } from '../src/constants.js';
+import { GREETER_ID, GREETER_TILE_MARGIN } from '../src/constants.js';
 import { OfficeState } from '../src/office/engine/officeState.js';
 import type { OfficeLayout } from '../src/office/types.js';
 import { CharacterState, MATRIX_EFFECT_DURATION, TileType } from '../src/office/types.js';
@@ -44,7 +44,7 @@ function floorLayout(cols = 9, rows = 7): OfficeLayout {
 /** The greeter's target tile, derived from the margin constant rather than
  *  restated — retuning the margin is a design change, not a broken test. */
 function targetTile(rows: number): { col: number; row: number } {
-  return { col: CONSENT_GREETER_TILE_MARGIN, row: rows - 1 - CONSENT_GREETER_TILE_MARGIN };
+  return { col: GREETER_TILE_MARGIN, row: rows - 1 - GREETER_TILE_MARGIN };
 }
 
 test('spawns in from the bottom-left corner, standing, without a seat', () => {
@@ -156,7 +156,7 @@ test('lives outside the agent map, and is drawn anyway', () => {
   os.spawnGreeter();
 
   assert.equal(os.characters.size, 1, 'the agent map holds the agent alone');
-  assert.equal(os.characters.get(CONSENT_GREETER_ID), undefined);
+  assert.equal(os.characters.get(GREETER_ID), undefined);
   assert.ok(
     os.getCharacters().some((c) => c.isGreeter),
     'but the render feed includes it',
@@ -171,7 +171,7 @@ test('never reaches the persisted seat payload', () => {
   const seats = os.getPersistableSeats();
   assert.deepEqual(Object.keys(seats), ['7'], 'only the real agent is persisted');
   assert.equal(
-    CONSENT_GREETER_ID.toString() in seats,
+    GREETER_ID.toString() in seats,
     false,
     'a greeter entry would outlive the ask in ~/.pixel-agents state',
   );
@@ -225,10 +225,10 @@ test('greeter camera target: per-frame updates land until a manual pan cancels t
   assert.deepEqual(os.greeterCameraTarget, { x: 5, y: 6 });
 });
 
-test('CONSENT_GREETER_ID cannot collide with sub-agent ids', () => {
+test('GREETER_ID cannot collide with sub-agent ids', () => {
   const os = new OfficeState(floorLayout());
   os.spawnGreeter();
   const subId = os.addSubagent(1, 'tool-1');
-  assert.ok(subId > CONSENT_GREETER_ID, 'sub-agent ids count down from -1, far above the greeter');
+  assert.ok(subId > GREETER_ID, 'sub-agent ids count down from -1, far above the greeter');
   assert.equal(os.greeter!.isGreeter, true);
 });

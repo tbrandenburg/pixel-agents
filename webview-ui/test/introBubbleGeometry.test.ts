@@ -14,13 +14,13 @@ import { test } from 'vitest';
 import type { IntroBubbleFrame } from '../src/components/introBubbleGeometry.js';
 import { computeIntroBubbleGeometry } from '../src/components/introBubbleGeometry.js';
 import {
-  CONSENT_BUBBLE_ANCHOR_RISE_WORLD,
-  CONSENT_BUBBLE_EDGE_MARGIN_PX,
-  CONSENT_BUBBLE_OFFSET_X_WORLD,
-  CONSENT_CAMERA_MAX_X_OFFSET_VIEWPORT_FRACTION,
-  CONSENT_CAMERA_MIN_CHAR_VISIBLE_WORLD,
-  CONSENT_TAIL_STEPS,
-  CONSENT_TAIL_TARGET_RISE_WORLD,
+  INTRO_BUBBLE_ANCHOR_RISE_WORLD,
+  INTRO_BUBBLE_EDGE_MARGIN_PX,
+  INTRO_BUBBLE_OFFSET_X_WORLD,
+  INTRO_CAMERA_MAX_X_OFFSET_VIEWPORT_FRACTION,
+  INTRO_CAMERA_MIN_CHAR_VISIBLE_WORLD,
+  INTRO_TAIL_STEPS,
+  INTRO_TAIL_TARGET_RISE_WORLD,
 } from '../src/constants.js';
 import { TILE_SIZE } from '../src/office/types.js';
 
@@ -49,8 +49,8 @@ test('anchors the bubble bottom-left up-right of the head in a roomy container',
   const mapH = frame.layout.rows * TILE_SIZE * frame.zoom;
   const offsetX = Math.floor((frame.containerRect.width - mapW) / 2);
   const offsetY = Math.floor((frame.containerRect.height - mapH) / 2);
-  const anchorX = offsetX + (frame.greeter.x + CONSENT_BUBBLE_OFFSET_X_WORLD) * frame.zoom;
-  const anchorY = offsetY + (frame.greeter.y - CONSENT_BUBBLE_ANCHOR_RISE_WORLD) * frame.zoom;
+  const anchorX = offsetX + (frame.greeter.x + INTRO_BUBBLE_OFFSET_X_WORLD) * frame.zoom;
+  const anchorY = offsetY + (frame.greeter.y - INTRO_BUBBLE_ANCHOR_RISE_WORLD) * frame.zoom;
 
   assert.equal(g.left, anchorX, 'left edge sits at the world anchor');
   assert.equal(g.top, anchorY - frame.bubbleHeight, 'bottom edge sits at the world anchor');
@@ -65,7 +65,7 @@ test('clamps the bubble inside a container too small for the preferred spot', ()
     }),
   );
 
-  const margin = CONSENT_BUBBLE_EDGE_MARGIN_PX;
+  const margin = INTRO_BUBBLE_EDGE_MARGIN_PX;
   assert.ok(g.left >= margin, 'never past the left margin');
   assert.ok(g.left + 300 <= 320 - margin, 'never past the right margin');
   assert.ok(g.top >= margin, 'never past the top margin');
@@ -76,7 +76,7 @@ test('tail squares step from the bubble edge toward the head, shrinking', () => 
   const frame = roomyFrame();
   const g = computeIntroBubbleGeometry(frame);
 
-  assert.equal(g.tailSquares.length, CONSENT_TAIL_STEPS.length);
+  assert.equal(g.tailSquares.length, INTRO_TAIL_STEPS.length);
 
   // The head in wrapper coordinates (the squares' frame of reference).
   const mapW = frame.layout.cols * TILE_SIZE * frame.zoom;
@@ -85,7 +85,7 @@ test('tail squares step from the bubble edge toward the head, shrinking', () => 
     Math.floor((frame.containerRect.width - mapW) / 2) + frame.greeter.x * frame.zoom - g.left;
   const headY =
     Math.floor((frame.containerRect.height - mapH) / 2) +
-    (frame.greeter.y - CONSENT_TAIL_TARGET_RISE_WORLD) * frame.zoom -
+    (frame.greeter.y - INTRO_TAIL_TARGET_RISE_WORLD) * frame.zoom -
     g.top;
 
   let prevDist = Infinity;
@@ -120,13 +120,13 @@ test('keeps the tail attached when clamping moves the bubble away from the head'
     Math.floor((frame.containerRect.width - mapW) / 2) + frame.greeter.x * frame.zoom - g.left;
   const headY =
     Math.floor((frame.containerRect.height - mapH) / 2) +
-    (frame.greeter.y - CONSENT_TAIL_TARGET_RISE_WORLD) * frame.zoom -
+    (frame.greeter.y - INTRO_TAIL_TARGET_RISE_WORLD) * frame.zoom -
     g.top;
 
   // Squares sit at fraction t along the root→head segment; de-interpolate the
   // first one to recover the ROOT and pin it to the bubble's own rectangle.
   const first = g.tailSquares[0];
-  const t = CONSENT_TAIL_STEPS[0].t;
+  const t = INTRO_TAIL_STEPS[0].t;
   const cx = first.x + first.size / 2;
   const cy = first.y + first.size / 2;
   const rootX = (cx - headX * t) / (1 - t);
@@ -157,7 +157,7 @@ test('camera x-offset is capped on a narrow viewport', () => {
   const narrow = computeIntroBubbleGeometry(
     roomyFrame({ containerRect: { width: 240, height: 600 } }),
   );
-  const cap = (240 / 2) * CONSENT_CAMERA_MAX_X_OFFSET_VIEWPORT_FRACTION; // width in world units × fraction
+  const cap = (240 / 2) * INTRO_CAMERA_MAX_X_OFFSET_VIEWPORT_FRACTION; // width in world units × fraction
   assert.ok(
     narrow.cameraTarget.x - roomyFrame().greeter.x <= cap + 1e-9,
     'x offset never exceeds the viewport fraction cap',
@@ -173,11 +173,11 @@ test('camera y-offset always keeps the character in view on a short viewport', (
 
   // Uncapped, half the (rise + 400px-tall bubble) would center far above the
   // greeter and push it below the bottom edge. The cap guarantees at least
-  // CONSENT_CAMERA_MIN_CHAR_VISIBLE_WORLD of world height under the target.
+  // INTRO_CAMERA_MIN_CHAR_VISIBLE_WORLD of world height under the target.
   const viewportWorldH = (180 * frame.dpr) / frame.zoom;
   const visibleBelowTarget = viewportWorldH / 2 - (frame.greeter.y - g.cameraTarget.y);
   assert.ok(
-    visibleBelowTarget >= CONSENT_CAMERA_MIN_CHAR_VISIBLE_WORLD - 1e-9,
-    `character keeps ${CONSENT_CAMERA_MIN_CHAR_VISIBLE_WORLD} world px of view below center (got ${visibleBelowTarget.toFixed(1)})`,
+    visibleBelowTarget >= INTRO_CAMERA_MIN_CHAR_VISIBLE_WORLD - 1e-9,
+    `character keeps ${INTRO_CAMERA_MIN_CHAR_VISIBLE_WORLD} world px of view below center (got ${visibleBelowTarget.toFixed(1)})`,
   );
 });

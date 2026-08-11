@@ -4,21 +4,15 @@ import { DISCORD_INVITE_URL } from '../changelogData.js';
 import {
   CLAUDE_CODE_INSTALL_COMMAND,
   CLAUDE_CODE_URL,
-  CONSENT_BUBBLE_EDGE_MARGIN_PX,
-  CONSENT_BUBBLE_MAX_WIDTH_PX,
+  INTRO_BUBBLE_EDGE_MARGIN_PX,
+  INTRO_BUBBLE_MAX_WIDTH_PX,
   INTRO_BUBBLE_Z_INDEX,
 } from '../constants.js';
+import type { ConsentChoice } from '../hooks/introTourState.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { DiscordIcon } from './ChangelogModal.js';
 import { computeIntroBubbleGeometry } from './introBubbleGeometry.js';
 import { Button } from './ui/Button.js';
-
-export type ConsentChoice = 'install' | 'notNow' | 'never';
-
-/** What the server did with an `install` answer, as the closing step reports
- *  it: `null` until a `hooksStatus` comes back, then the install state it
- *  carried. The tour must not congratulate a user whose install failed. */
-export type InstallOutcome = boolean | null;
 
 interface IntroBubbleProps {
   officeState: OfficeState;
@@ -32,9 +26,13 @@ interface IntroBubbleProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
   zoom: number;
   panRef: React.RefObject<{ x: number; y: number }>;
-  /** The verdict on an `install` answer sent from this tour. Held by the App,
-   *  which is what sees `hooksStatus` arrive. */
-  installOutcome: InstallOutcome;
+  /** The closing step's verdict: the install this tour asked for FAILED. The
+   *  tour must not congratulate a user whose install failed. False both while
+   *  no verdict has arrived (still optimistic — the overwhelmingly common
+   *  case is success, and a "working…" flash on every install would be worse
+   *  than a late correction) and after a success. Owned by useIntroTour,
+   *  which sees `hooksStatus` arrive and knows what this tour sent. */
+  installFailed: boolean;
   /** A consent-step button click: sends the choice to the server and the tour
    *  moves on. Does NOT close the tour — the caller must keep this component
    *  mounted after a choice so the closing step can show. */
@@ -91,16 +89,13 @@ export function IntroBubble({
   containerRef,
   zoom,
   panRef,
-  installOutcome,
+  installFailed,
   onChoice,
   onClose,
 }: IntroBubbleProps) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [, setTick] = useState(0);
   const [step, setStep] = useState(WELCOME_STEP);
-  /** The consent answer this tour sent, if any — the closing step reads it to
-   *  know whether `installOutcome` is even about this user's choice. */
-  const [sentChoice, setSentChoice] = useState<ConsentChoice | null>(null);
 
   // The greeter lives exactly as long as this component.
   useEffect(() => {
@@ -157,8 +152,8 @@ export function IntroBubble({
 
   const rect = el.getBoundingClientRect();
   const maxWidth = Math.min(
-    CONSENT_BUBBLE_MAX_WIDTH_PX,
-    rect.width - 2 * CONSENT_BUBBLE_EDGE_MARGIN_PX,
+    INTRO_BUBBLE_MAX_WIDTH_PX,
+    rect.width - 2 * INTRO_BUBBLE_EDGE_MARGIN_PX,
   );
 
   // Measurements come from the previous frame's node (the rAF tick re-renders
@@ -191,19 +186,9 @@ export function IntroBubble({
   const back = (): void => setStep((s) => Math.max(WELCOME_STEP, s - 1));
   const forward = (): void => setStep((s) => Math.min(CLOSING_STEP, s + 1));
   const choose = (choice: ConsentChoice): void => {
-    setSentChoice(choice);
     onChoice(choice);
     setStep(CLOSING_STEP);
   };
-
-  // The closing step reports the outcome, not the intent. An install can fail
-  // for reasons that have nothing to do with the click (the installer refuses
-  // to touch a settings.json it cannot parse), and congratulating the user
-  // then leaves them believing hooks are running when nothing was written.
-  // `null` is the window between the click and the server's hooksStatus —
-  // still optimistic, because the overwhelmingly common case is success and a
-  // "working…" flash on every install would be worse than a late correction.
-  const installFailed = sentChoice === 'install' && installOutcome === false;
 
   const titles = [
     'Welcome to Pixel Agents!',

@@ -5,10 +5,10 @@ import {
   CHARACTER_HIT_HALF_WIDTH,
   CHARACTER_HIT_HEIGHT,
   CHARACTER_SITTING_OFFSET_PX,
-  CONSENT_GREETER_ID,
-  CONSENT_GREETER_TILE_MARGIN,
   DISMISS_BUBBLE_FAST_FADE_SEC,
   FURNITURE_ANIM_INTERVAL_SEC,
+  GREETER_ID,
+  GREETER_TILE_MARGIN,
   INACTIVE_SEAT_TIMER_MIN_SEC,
   INACTIVE_SEAT_TIMER_RANGE_SEC,
   MAX_PET_ID_LENGTH,
@@ -500,7 +500,7 @@ export class OfficeState {
   // (IntroBubble). It is not an agent — see the `greeter` field.
 
   /** Spawn the greeter near the office's bottom-left corner: target tile
-   *  CONSENT_GREETER_TILE_MARGIN in from the left and bottom edges, falling
+   *  GREETER_TILE_MARGIN in from the left and bottom edges, falling
    *  back to the closest walkable tile when the target is a seat, furniture,
    *  a wall, or VOID (seat tiles are in blockedTiles, so closestFreeWalkableTile
    *  covers every one of those). Idempotent; a remount mid-despawn (StrictMode)
@@ -512,11 +512,11 @@ export class OfficeState {
       return;
     }
     const spawn = this.closestFreeWalkableTile(
-      CONSENT_GREETER_TILE_MARGIN,
-      this.layout.rows - 1 - CONSENT_GREETER_TILE_MARGIN,
+      GREETER_TILE_MARGIN,
+      this.layout.rows - 1 - GREETER_TILE_MARGIN,
     );
     if (!spawn) return; // no walkable tile — IntroBubble falls back to a fixed panel
-    const ch = createCharacter(CONSENT_GREETER_ID, 0, null, null, 0);
+    const ch = createCharacter(GREETER_ID, 0, null, null, 0);
     ch.isGreeter = true;
     ch.state = CharacterState.IDLE;
     ch.isActive = false;
