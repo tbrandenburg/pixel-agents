@@ -58,25 +58,42 @@ export function hooksConsentRequest(state: ConsentGateState): HooksConsentReques
  *  The Intro lets the user walk BACK from the closing step and change an
  *  already-sent answer, so a choice is an absolute statement of the state the
  *  user wants — not a one-shot event. Which action a decline maps to therefore
- *  depends on whether our hooks are on disk right now (they are exactly when
- *  an earlier `install` from this ask landed, or another surface installed):
+ *  depends on what the earlier answer already LEFT BEHIND: our hooks on disk,
+ *  a recorded consent grant, or both.
  *
  *  - `install`: grant consent and install, the same path as the Settings
  *    toggle. Idempotent, so a repeated install is safe.
  *  - `persistOff` (never, nothing installed): persist hooks-off and write
  *    nothing to settings.json — there is nothing to remove and no reason to
  *    touch the file (or to fail on an unparseable one while merely declining).
+ *    A grant left over from a failed install may stay: hooks-off retires the
+ *    ask on its own, and re-enabling from Settings is itself a fresh grant.
  *  - `disable` (never, ours installed): the full Settings toggle-off path —
  *    uninstall, then persist hooks-off only after the on-disk result agrees.
  *    Without this, a revised "never" would leave live hooks behind a
  *    persisted hooks-off: entries firing, checkbox lying, gate skipped.
- *  - `revert` (notNow, ours installed): uninstall and revoke the consent
- *    grant, leaving the hooks preference alone — "not now" means the ask
- *    should come back, and a recorded grant (or a persisted off) would
- *    silently retire it.
- *  - `none` (notNow, nothing installed — and every junk value): write nothing
- *    at all; the ask fires again on the next connect. */
+ *  - `revert` (notNow, over anything an earlier answer left): undo it and
+ *    revoke the consent grant, leaving the hooks preference alone — "not now"
+ *    means the ask should come back, and a recorded grant would silently
+ *    retire it forever.
+ *  - `none` (notNow with nothing to undo — and every junk value): write
+ *    nothing at all; the ask fires again on the next connect. */
 export type ConsentAction = 'install' | 'persistOff' | 'disable' | 'revert' | 'none';
+
+/** What an earlier answer may have left behind, as the surface reads it when
+ *  the next answer arrives. */
+export interface ConsentRevisionState {
+  /** Are any of OUR hook commands on disk right now (areHooksInstalled)?
+   *  Callers that cannot read it pass false — the file is then never touched
+   *  on a guess. */
+  installed: boolean;
+  /** Has a grant been recorded (config.json hooksConsentGiven)? Read
+   *  SEPARATELY from `installed` because `install` grants BEFORE it writes: an
+   *  install that then failed leaves a grant with nothing on disk, and that
+   *  grant is what retires the ask. Keying the revert off `installed` alone
+   *  stranded exactly that user — the ask never came back. */
+  consentGiven: boolean;
+}
 
 /**
  * Fail-closed on exact matches. Only the literal `'install'` approves and only
@@ -85,14 +102,11 @@ export type ConsentAction = 'install' | 'persistOff' | 'disable' | 'revert' | 'n
  * all fall through to the no-write actions.
  *
  * `unknown` is the honest parameter type for `choice`: this runs on a wire
- * message, and narrowing it here is the point of the function. `installed` is
- * the on-disk truth (areHooksInstalled) at the moment the answer arrives —
- * callers that cannot read it pass false, which degrades every choice to its
- * no-file-touch variant.
+ * message, and narrowing it here is the point of the function.
  */
-export function consentActionFor(choice: unknown, installed: boolean): ConsentAction {
+export function consentActionFor(choice: unknown, state: ConsentRevisionState): ConsentAction {
   if (choice === 'install') return 'install';
-  if (choice === 'never') return installed ? 'disable' : 'persistOff';
-  if (choice === 'notNow') return installed ? 'revert' : 'none';
+  if (choice === 'never') return state.installed ? 'disable' : 'persistOff';
+  if (choice === 'notNow') return state.installed || state.consentGiven ? 'revert' : 'none';
   return 'none';
 }

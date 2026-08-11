@@ -93,13 +93,13 @@ export class OfficeState {
    */
   greeter: Character | null = null;
 
-  /** World-space point the camera drifts to while the consent greeter is up
+  /** World-space point the camera drifts to while the greeter is up
    *  (the bubble overlay recomputes it every frame: the combined center of the
    *  character and its speech bubble). An explicit cameraFollowId outranks it. */
-  consentCameraTarget: { x: number; y: number } | null = null;
+  greeterCameraTarget: { x: number; y: number } | null = null;
   /** Latched by a manual pan during the ask: the user took the camera, so the
    *  overlay's per-frame updates stop re-centering. Reset on spawn/despawn. */
-  private consentCameraCancelled = false;
+  private greeterCameraCancelled = false;
 
   setAreaMappings(mappings: Record<string, string[]>): void {
     this.areaMappings = mappings;
@@ -494,10 +494,10 @@ export class OfficeState {
     this.characters.set(id, ch);
   }
 
-  // ── Consent greeter ───────────────────────────────────────────
-  // The first-run consent ask is diegetic: a char_0 character stands near the
-  // office's bottom-left corner and "speaks" the disclosure through a DOM
-  // bubble (ConsentBubble). It is not an agent — see the `greeter` field.
+  // ── Greeter ───────────────────────────────────────────────────
+  // The Intro is diegetic: a char_0 character stands near the office's
+  // bottom-left corner and "speaks" the tour through a DOM bubble
+  // (IntroBubble). It is not an agent — see the `greeter` field.
 
   /** Spawn the greeter near the office's bottom-left corner: target tile
    *  CONSENT_GREETER_TILE_MARGIN in from the left and bottom edges, falling
@@ -505,8 +505,8 @@ export class OfficeState {
    *  a wall, or VOID (seat tiles are in blockedTiles, so closestFreeWalkableTile
    *  covers every one of those). Idempotent; a remount mid-despawn (StrictMode)
    *  revives it. */
-  spawnConsentGreeter(): void {
-    this.consentCameraCancelled = false;
+  spawnGreeter(): void {
+    this.greeterCameraCancelled = false;
     if (this.greeter) {
       if (this.greeter.matrixEffect === 'despawn') startMatrixEffect(this.greeter, 'spawn');
       return;
@@ -515,7 +515,7 @@ export class OfficeState {
       CONSENT_GREETER_TILE_MARGIN,
       this.layout.rows - 1 - CONSENT_GREETER_TILE_MARGIN,
     );
-    if (!spawn) return; // no walkable tile — ConsentBubble falls back to a fixed panel
+    if (!spawn) return; // no walkable tile — IntroBubble falls back to a fixed panel
     const ch = createCharacter(CONSENT_GREETER_ID, 0, null, null, 0);
     ch.isGreeter = true;
     ch.state = CharacterState.IDLE;
@@ -529,29 +529,25 @@ export class OfficeState {
     this.greeter = ch;
   }
 
-  /** Start the greeter's despawn effect and release the consent camera. The
+  /** Start the greeter's despawn effect and release the greeter camera. The
    *  character is dropped once the effect finishes (see update()).
    *  Idempotent — every close path (answer, Escape, hooksStatus) funnels here. */
-  despawnConsentGreeter(): void {
-    this.consentCameraTarget = null;
-    this.consentCameraCancelled = false;
+  despawnGreeter(): void {
+    this.greeterCameraTarget = null;
+    this.greeterCameraCancelled = false;
     if (!this.greeter || this.greeter.matrixEffect === 'despawn') return;
     startMatrixEffect(this.greeter, 'despawn');
   }
 
-  getConsentGreeter(): Character | null {
-    return this.greeter;
-  }
-
   /** Per-frame update from the bubble overlay; ignored once the user panned. */
-  setConsentCameraTarget(p: { x: number; y: number }): void {
-    if (!this.consentCameraCancelled) this.consentCameraTarget = p;
+  setGreeterCameraTarget(p: { x: number; y: number }): void {
+    if (!this.greeterCameraCancelled) this.greeterCameraTarget = p;
   }
 
   /** Manual pan during the ask: stop re-centering until the next spawn. */
-  cancelConsentCamera(): void {
-    this.consentCameraTarget = null;
-    this.consentCameraCancelled = true;
+  cancelGreeterCamera(): void {
+    this.greeterCameraTarget = null;
+    this.greeterCameraCancelled = true;
   }
 
   removeAgent(id: number): void {

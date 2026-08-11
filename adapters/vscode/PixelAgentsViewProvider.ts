@@ -25,12 +25,7 @@ import {
   sendWallTilesToWebview,
 } from '../../server/src/assetLoader.js';
 import { loadAllCharacters, loadAllFurniture, loadAllPets } from '../../server/src/assetReload.js';
-import {
-  grantHooksConsent,
-  readConfig,
-  revokeHooksConsent,
-  writeConfig,
-} from '../../server/src/configPersistence.js';
+import { grantHooksConsent, readConfig, writeConfig } from '../../server/src/configPersistence.js';
 import { setFolderNameResolver, setTerminalAdapter } from '../../server/src/fileWatcher.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
@@ -39,10 +34,9 @@ import {
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
 import { PathSet } from '../../server/src/pathKey.js';
-import {
-  consentActionFor,
-  hooksConsentRequest,
-} from '../../server/src/providers/hook/claude/consentGate.js';
+import type { ConsentEffects } from '../../server/src/providers/hook/claude/consentExecutor.js';
+import { applyConsentChoice } from '../../server/src/providers/hook/claude/consentExecutor.js';
+import { hooksConsentRequest } from '../../server/src/providers/hook/claude/consentGate.js';
 import { claudeProvider, copyHookScript } from '../../server/src/providers/index.js';
 import { PixelAgentsServer } from '../../server/src/server.js';
 import {
@@ -359,37 +353,15 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     await this.installHooksAndScript(port, token);
   }
 
-  /** The Intro consent step's answer. The fail-closed choice→action rule
-   *  lives in consentGate (shared with the standalone surface, so the two
-   *  cannot drift on what counts as approval). The Intro lets the user walk
-   *  back and REVISE an already-sent answer, so the install state is read
-   *  fresh off the disk: a decline over a landed install must undo it, not
-   *  merely record a preference beside it. An unreadable settings file
-   *  degrades to installed=false, mapping every choice to its no-file-touch
-   *  variant — never uninstall on a guess. */
-  private async handleHooksConsentResponse(choice: unknown): Promise<void> {
-    const installed = await claudeProvider.areHooksInstalled().catch(() => false);
-    switch (consentActionFor(choice, installed)) {
-      case 'install':
-        // Clicking Install IS the consent grant, exactly like the Settings
-        // toggle — so it goes through setHooksEnabled, which grants consent,
-        // installs, then re-derives the on-disk state before persisting the
-        // preference. Reimplementing the grant here is how this path lost that
-        // last step: an install could land while a "Don't Ask Again" from
-        // another window kept the preference off, leaving the runtime treating
-        // live hooks as disabled.
-        await this.setHooksEnabled(true);
-        break;
-      case 'disable':
-        // A revised "never" over a landed install: the full toggle-off path —
-        // uninstall first, persist hooks-off only once the disk agrees.
-        await this.setHooksEnabled(false);
-        break;
-      case 'revert': {
-        // A revised "not now" over a landed install: undo it entirely. The
-        // preference is left alone and the consent grant is revoked instead —
-        // "not now" must leave the world exactly as if never answered, so the
-        // ask comes back on the next open.
+  /** This surface's half of carrying out a consent answer. Both the
+   *  choice→action rule and the order of the writes live in the shared consent
+   *  modules (so the two surfaces cannot drift on what counts as approval, nor
+   *  on what a revised answer undoes); only the effects below are VS
+   *  Code-specific. */
+  private consentEffects(): ConsentEffects {
+    return {
+      setHooksEnabled: (enabled) => this.setHooksEnabled(enabled),
+      uninstallHooks: async () => {
         try {
           await claudeProvider.uninstallHooks();
         } catch (err: unknown) {
@@ -397,23 +369,14 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             `Pixel Agents: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-        const stillInstalled = await claudeProvider.areHooksInstalled().catch(() => true);
-        if (!stillInstalled) revokeHooksConsent();
-        await this.reportHooksStatus();
-        break;
-      }
-      case 'persistOff':
-        // Persist hooks-off WITHOUT touching ~/.claude/settings.json — with
-        // nothing of ours installed there is nothing to remove, and routing
-        // through the uninstaller would surface a file error for the act of
-        // declining.
+      },
+      areHooksInstalled: () => claudeProvider.areHooksInstalled(),
+      persistHooksOff: () => {
         this.adapter.setSetting(GLOBAL_KEY_HOOKS_ENABLED, false);
         this.runtime.hooksEnabled.current = false;
-        await this.reportHooksStatus();
-        break;
-      case 'none':
-        break; // writes nothing; the ask fires again on the next webviewReady
-    }
+      },
+      reportHooksStatus: () => this.reportHooksStatus(),
+    };
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
@@ -494,7 +457,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
       } else if (message.type === 'setHooksEnabled') {
         void this.setHooksEnabled(message.enabled as boolean);
       } else if (message.type === 'hooksConsentResponse') {
-        void this.handleHooksConsentResponse(message.choice);
+        void applyConsentChoice(message.choice, this.consentEffects());
       } else if (message.type === 'setHooksInfoShown') {
         this.adapter.setSetting(GLOBAL_KEY_HOOKS_INFO_SHOWN, true);
       } else if (message.type === 'setShowAreas') {

@@ -233,15 +233,15 @@ export function OfficeCanvas({
           }
         }
 
-        // Camera: smoothly center on the followed agent, or — while the consent
-        // greeter is asking — on the character+bubble center the ConsentBubble
-        // overlay feeds via consentCameraTarget. An explicit follow (clicking an
-        // agent) outranks the consent target; a manual pan cancels both.
+        // Camera: smoothly center on the followed agent, or — while the greeter
+        // is speaking the Intro — on the character+bubble center the IntroBubble
+        // overlay feeds via greeterCameraTarget. An explicit follow (clicking an
+        // agent) outranks the greeter target; a manual pan cancels both.
         const followCh =
           officeState.cameraFollowId !== null
             ? officeState.characters.get(officeState.cameraFollowId)
             : undefined;
-        const cameraFocus = followCh ?? officeState.consentCameraTarget;
+        const cameraFocus = followCh ?? officeState.greeterCameraTarget;
         if (cameraFocus) {
           const layout = officeState.getLayout();
           const mapW = layout.cols * TILE_SIZE * zoom;
@@ -541,9 +541,9 @@ export function OfficeCanvas({
       // Middle mouse button (button 1) starts panning
       if (e.button === 1) {
         e.preventDefault();
-        // Break camera follow + consent centering on manual pan
+        // Break camera follow + greeter centering on manual pan
         officeState.cameraFollowId = null;
-        officeState.cancelConsentCamera();
+        officeState.cancelGreeterCamera();
         isPanningRef.current = true;
         panStartRef.current = {
           mouseX: e.clientX,
@@ -848,7 +848,7 @@ export function OfficeCanvas({
         // Pan via trackpad two-finger scroll or mouse wheel
         const dpr = window.devicePixelRatio || 1;
         officeState.cameraFollowId = null;
-        officeState.cancelConsentCamera();
+        officeState.cancelGreeterCamera();
         panRef.current = clampPan(
           panRef.current.x - e.deltaX * dpr,
           panRef.current.y - e.deltaY * dpr,

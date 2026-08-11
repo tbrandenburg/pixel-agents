@@ -206,10 +206,15 @@ export const CHARACTER_HIT_HALF_WIDTH = 8;
 export const CHARACTER_HIT_HEIGHT = 24;
 export const TOOL_OVERLAY_VERTICAL_OFFSET = 32;
 
-// ── Consent Greeter ─────────────────────────────────────────
-/** Reserved character id for the first-run consent greeter. Far outside both
- *  real agent ids (positive) and sub-agent ids (small negatives from -1 down). */
+// ── Greeter + Intro bubble ──────────────────────────────────
+/** Reserved character id for the Intro's greeter. Far outside both real agent
+ *  ids (positive) and sub-agent ids (small negatives from -1 down). */
 export const CONSENT_GREETER_ID = -1_000_000_000;
+/** Stacking order for the Intro's bubble. Deliberately BELOW the modal stack
+ *  (ui/Modal defaults to 50, ChangelogModal 51, the migration notice 52): the
+ *  Intro is diegetic furniture over the office, not a modal, so a modal opened
+ *  on top of it must cover it rather than slide underneath. */
+export const INTRO_BUBBLE_Z_INDEX = 45;
 /** The greeter stands this many tiles in from the office's bottom-left corner
  *  (target tile (margin, rows-1-margin); nearest walkable tile if blocked). */
 export const CONSENT_GREETER_TILE_MARGIN = 3;

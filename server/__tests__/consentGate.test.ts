@@ -60,40 +60,57 @@ describe('hooksConsentRequest — when to ask', () => {
 });
 
 describe('consentActionFor — what an answer means', () => {
+  /** Nothing of ours on disk and no grant recorded: the first answer of a
+   *  fresh ask, before anything has been written. */
+  const untouched = { installed: false, consentGiven: false };
+  /** What a landed Install leaves behind. */
+  const landed = { installed: true, consentGiven: true };
+
   // The Intro lets the user walk back from the closing step and revise an
   // already-sent answer, so a choice is an absolute statement of desired
-  // state: what a decline maps to depends on whether our hooks are on disk
-  // right now (they are exactly when an earlier Install landed).
-  it('installs on an exact install, whether or not hooks are on disk', () => {
-    expect(consentActionFor('install', false)).toBe('install');
-    expect(consentActionFor('install', true)).toBe('install');
+  // state: what a decline maps to depends on what the earlier answer left
+  // behind — hooks on disk, a recorded grant, or both.
+  it('installs on an exact install, whatever the earlier answer left', () => {
+    expect(consentActionFor('install', untouched)).toBe('install');
+    expect(consentActionFor('install', landed)).toBe('install');
   });
 
   it('persists hooks-off on an exact never with nothing installed', () => {
-    expect(consentActionFor('never', false)).toBe('persistOff');
+    expect(consentActionFor('never', untouched)).toBe('persistOff');
   });
 
   // A revised "never" over a landed install must remove the hooks, not merely
   // record a preference beside them — a persisted hooks-off over live entries
   // is the stranding bug: entries firing, checkbox lying, gate skipped.
   it('takes the full toggle-off path on a never over a landed install', () => {
-    expect(consentActionFor('never', true)).toBe('disable');
+    expect(consentActionFor('never', landed)).toBe('disable');
   });
 
-  it('writes nothing on a notNow with nothing installed', () => {
-    expect(consentActionFor('notNow', false)).toBe('none');
+  it('writes nothing on a notNow with nothing to undo', () => {
+    expect(consentActionFor('notNow', untouched)).toBe('none');
   });
 
   // A revised "not now" over a landed install must leave the world exactly as
   // if never answered: uninstall AND revoke the recorded grant, so the ask
   // genuinely comes back on the next open.
   it('reverts the install on a notNow over a landed install', () => {
-    expect(consentActionFor('notNow', true)).toBe('revert');
+    expect(consentActionFor('notNow', landed)).toBe('revert');
   });
 
-  // Every unrecognized value writes nothing — installed or not. Junk must
-  // never be read as approval, as a durable decline (which would silently
-  // retire the ask on a malformed message), or as an uninstall trigger.
+  // The population issue #377 is about: a settings.json we refuse to touch.
+  // Install grants BEFORE it writes, so a failed install leaves a grant with
+  // nothing on disk — and the grant alone retires the ask forever. Keying the
+  // revert off `installed` read this as "nothing to undo" and the user was
+  // never asked again. The grant is a thing an earlier answer left behind, so
+  // it is a thing "not now" has to take back.
+  it('reverts a grant left by a failed install, with nothing on disk', () => {
+    expect(consentActionFor('notNow', { installed: false, consentGiven: true })).toBe('revert');
+  });
+
+  // Every unrecognized value writes nothing — whatever the earlier answer
+  // left. Junk must never be read as approval, as a durable decline (which
+  // would silently retire the ask on a malformed message), or as an uninstall
+  // trigger.
   it.each([
     'yes',
     'y',
@@ -112,7 +129,7 @@ describe('consentActionFor — what an answer means', () => {
     {},
     ['install'],
   ])('writes nothing for %j', (junk) => {
-    expect(consentActionFor(junk, false)).toBe('none');
-    expect(consentActionFor(junk, true)).toBe('none');
+    expect(consentActionFor(junk, untouched)).toBe('none');
+    expect(consentActionFor(junk, landed)).toBe('none');
   });
 });

@@ -1,7 +1,7 @@
 /**
  * The consent bubble's geometry, as one pure function of the measurable frame:
  * greeter position, container size, zoom, pan, and the bubble's own measured
- * box. ConsentBubble calls it every frame and renders the result verbatim.
+ * box. IntroBubble calls it every frame and renders the result verbatim.
  *
  * Split out of the component because this is the half most likely to be wrong
  * on a narrow VS Code side panel — edge clamping, the tail chasing a clamped
@@ -22,7 +22,7 @@ import {
 } from '../constants.js';
 import { overlayProjection } from '../office/projection.js';
 
-export interface ConsentBubbleFrame {
+export interface IntroBubbleFrame {
   layout: { cols: number; rows: number };
   containerRect: { width: number; height: number };
   zoom: number;
@@ -35,7 +35,7 @@ export interface ConsentBubbleFrame {
   bubbleHeight: number;
 }
 
-export interface ConsentBubbleGeometry {
+export interface IntroBubbleGeometry {
   /** Bubble top-left in container CSS px, clamped inside the container. */
   left: number;
   top: number;
@@ -49,7 +49,7 @@ export interface ConsentBubbleGeometry {
   cameraTarget: { x: number; y: number };
 }
 
-export function computeConsentBubbleGeometry(frame: ConsentBubbleFrame): ConsentBubbleGeometry {
+export function computeIntroBubbleGeometry(frame: IntroBubbleFrame): IntroBubbleGeometry {
   const { greeter, containerRect, bubbleWidth, bubbleHeight } = frame;
   const project = overlayProjection(frame.layout, containerRect, frame.zoom, frame.pan, frame.dpr);
   const margin = CONSENT_BUBBLE_EDGE_MARGIN_PX;
@@ -69,7 +69,7 @@ export function computeConsentBubbleGeometry(frame: ConsentBubbleFrame): Consent
   // Recomputed from the live geometry every frame, so the tail keeps pointing
   // at the head even when edge-clamping or a manual pan moves the bubble away
   // from its preferred spot above the character.
-  let tailSquares: ConsentBubbleGeometry['tailSquares'] = [];
+  let tailSquares: IntroBubbleGeometry['tailSquares'] = [];
   if (bubbleWidth > 0 && bubbleHeight > 0) {
     const headX = project.toScreenX(greeter.x);
     const headY = project.toScreenY(greeter.y - CONSENT_TAIL_TARGET_RISE_WORLD);

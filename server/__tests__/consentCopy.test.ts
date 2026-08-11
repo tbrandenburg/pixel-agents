@@ -12,7 +12,7 @@ import {
 /**
  * The consent copy is two pieces: the HEADLINE is the greeter's welcome line
  * and the DISCLOSURE is the speech-bubble body. Both surfaces render the same
- * `hooksConsentRequest` payload through the webview's ConsentBubble.
+ * `hooksConsentRequest` payload through the webview's IntroBubble.
  *
  * These tests pin the CONTENT contract — every disclosure fact is present, and
  * it lives in the shared constants rather than in either surface's own copy.

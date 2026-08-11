@@ -750,6 +750,92 @@ describe('clientMessageHandler: hooks consent flow', () => {
         installed: true,
       });
     });
+
+    // The population issue #377 is about: a settings.json the installer
+    // refuses to touch. `install` records the grant BEFORE it writes, so a
+    // failed install leaves a grant with nothing on disk — and the grant alone
+    // is what retires the ask. Reading the revert off `installed` saw "nothing
+    // to undo" here and did nothing, stranding the user with an ask that never
+    // came back.
+    it('a revised notNow revokes a grant left by a FAILED install', async () => {
+      grantHooksConsent(); // the Install click landed the grant...
+      // ...and nothing is on disk: the install threw and wrote nothing.
+      let uninstallAttempted = false;
+      ctx.onSetHooksEnabled = () => {
+        uninstallAttempted = true;
+      };
+
+      handleClientMessage(
+        { type: 'hooksConsentResponse', choice: 'notNow' },
+        (m) => sent.push(m),
+        ctx,
+      );
+      await settle();
+
+      expect(consentGiven()).toBe(false);
+      // Nothing of ours is installed, so there is nothing to remove — and
+      // routing through the uninstaller would surface a file error for the act
+      // of declining.
+      expect(uninstallAttempted).toBe(false);
+      expect(store.getAdapter()!.getSetting('pixel-agents.hooksEnabled', true)).toBe(true);
+
+      // The load-bearing half: the ask genuinely comes back.
+      sent = [];
+      await connect();
+      expect(sent.find((m) => m.type === 'hooksConsentRequest')).toBeDefined();
+    });
+
+    // The Intro is DESIGNED to produce two answers in a row (walk Back from
+    // the closing step, revise). Both are dispatched without awaiting, and
+    // each re-reads the disk to decide what it means — so an unserialized
+    // revision could observe the first answer's install mid-flight, read
+    // "nothing installed", and degrade into its no-op variant, leaving hooks
+    // installed against the user's final answer.
+    it('serializes a revision sent while the first answer is still installing', async () => {
+      let resolveInstall: (() => void) | undefined;
+      ctx.onSetHooksEnabled = (enabled) => {
+        if (enabled) {
+          // The real side effect (cli.ts) grants BEFORE it writes, then
+          // installs. Here the write is a slow one that only lands when we
+          // let it, so the revision can arrive mid-flight.
+          grantHooksConsent();
+          return new Promise<void>((resolve) => {
+            resolveInstall = () => {
+              seedInstalledHooks();
+              resolve();
+            };
+          });
+        }
+        removeOurHooks();
+        return undefined;
+      };
+
+      handleClientMessage(
+        { type: 'hooksConsentResponse', choice: 'install' },
+        (m) => sent.push(m),
+        ctx,
+      );
+      // The revision arrives before the install has written anything.
+      handleClientMessage(
+        { type: 'hooksConsentResponse', choice: 'never' },
+        (m) => sent.push(m),
+        ctx,
+      );
+      await settle();
+      expect(resolveInstall).toBeDefined();
+      resolveInstall!();
+      await settle();
+
+      // The revision ran AFTER the install landed, so it saw the hooks and
+      // took the full toggle-off path rather than merely persisting a
+      // preference beside live entries.
+      expect(consentGiven()).toBe(true);
+      expect(store.getAdapter()!.getSetting('pixel-agents.hooksEnabled', true)).toBe(false);
+      expect(sent.filter((m) => m.type === 'hooksStatus').at(-1)).toEqual({
+        type: 'hooksStatus',
+        installed: false,
+      });
+    });
   });
 });
 

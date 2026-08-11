@@ -6,13 +6,19 @@ import {
   CLAUDE_CODE_URL,
   CONSENT_BUBBLE_EDGE_MARGIN_PX,
   CONSENT_BUBBLE_MAX_WIDTH_PX,
+  INTRO_BUBBLE_Z_INDEX,
 } from '../constants.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { DiscordIcon } from './ChangelogModal.js';
-import { computeConsentBubbleGeometry } from './consentBubbleGeometry.js';
+import { computeIntroBubbleGeometry } from './introBubbleGeometry.js';
 import { Button } from './ui/Button.js';
 
 export type ConsentChoice = 'install' | 'notNow' | 'never';
+
+/** What the server did with an `install` answer, as the closing step reports
+ *  it: `null` until a `hooksStatus` comes back, then the install state it
+ *  carried. The tour must not congratulate a user whose install failed. */
+export type InstallOutcome = boolean | null;
 
 interface IntroBubbleProps {
   officeState: OfficeState;
@@ -26,6 +32,9 @@ interface IntroBubbleProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
   zoom: number;
   panRef: React.RefObject<{ x: number; y: number }>;
+  /** The verdict on an `install` answer sent from this tour. Held by the App,
+   *  which is what sees `hooksStatus` arrive. */
+  installOutcome: InstallOutcome;
   /** A consent-step button click: sends the choice to the server and the tour
    *  moves on. Does NOT close the tour — the caller must keep this component
    *  mounted after a choice so the closing step can show. */
@@ -61,12 +70,12 @@ const CLOSING_STEP = 3;
  * EVERY close path — the X, Escape, Let's Go, or a hooksStatus that moots an
  * unanswered ask — unmounts this component, and the unmount despawns the
  * greeter, so the two can never disagree. While mounted it feeds
- * officeState.consentCameraTarget so the camera drifts to center character +
+ * officeState.greeterCameraTarget so the camera drifts to center character +
  * bubble together (a manual pan cancels that; see
- * OfficeState.cancelConsentCamera).
+ * OfficeState.cancelGreeterCamera).
  *
  * All geometry — bubble position, tail, camera target — comes from
- * computeConsentBubbleGeometry, a pure per-frame function of the measured
+ * computeIntroBubbleGeometry, a pure per-frame function of the measured
  * frame; this component only measures and renders.
  *
  * Fail-closed by construction: only the three consent-step buttons send
@@ -82,17 +91,21 @@ export function IntroBubble({
   containerRef,
   zoom,
   panRef,
+  installOutcome,
   onChoice,
   onClose,
 }: IntroBubbleProps) {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const [, setTick] = useState(0);
   const [step, setStep] = useState(WELCOME_STEP);
+  /** The consent answer this tour sent, if any — the closing step reads it to
+   *  know whether `installOutcome` is even about this user's choice. */
+  const [sentChoice, setSentChoice] = useState<ConsentChoice | null>(null);
 
   // The greeter lives exactly as long as this component.
   useEffect(() => {
-    officeState.spawnConsentGreeter();
-    return () => officeState.despawnConsentGreeter();
+    officeState.spawnGreeter();
+    return () => officeState.despawnGreeter();
   }, [officeState]);
 
   useEffect(() => {
@@ -107,16 +120,16 @@ export function IntroBubble({
   // matrix effect, a pan, and the camera drift all move the anchor between
   // renders — and feed the camera target from the same geometry the render
   // uses, so the drift and the drawn bubble can never disagree. Ignored after
-  // a manual pan (cancelConsentCamera).
+  // a manual pan (cancelGreeterCamera).
   useEffect(() => {
     let rafId = 0;
     const tick = () => {
-      const ch = officeState.getConsentGreeter();
+      const ch = officeState.greeter;
       const bubble = bubbleRef.current;
       const container = containerRef.current;
       if (ch && bubble && container && bubble.offsetWidth > 0) {
-        officeState.setConsentCameraTarget(
-          computeConsentBubbleGeometry({
+        officeState.setGreeterCameraTarget(
+          computeIntroBubbleGeometry({
             layout: officeState.getLayout(),
             containerRect: container.getBoundingClientRect(),
             zoom,
@@ -138,7 +151,7 @@ export function IntroBubble({
   const el = containerRef.current;
   if (!el) return null;
 
-  const greeter = officeState.getConsentGreeter();
+  const greeter = officeState.greeter;
   // Let the materialization effect finish before the greeter "speaks".
   if (greeter && greeter.matrixEffect === 'spawn') return null;
 
@@ -157,7 +170,7 @@ export function IntroBubble({
   let wrapperStyle: React.CSSProperties;
   let tailSquares: Array<{ x: number; y: number; size: number }> = [];
   if (greeter) {
-    const geometry = computeConsentBubbleGeometry({
+    const geometry = computeIntroBubbleGeometry({
       layout: officeState.getLayout(),
       containerRect: rect,
       zoom,
@@ -178,21 +191,35 @@ export function IntroBubble({
   const back = (): void => setStep((s) => Math.max(WELCOME_STEP, s - 1));
   const forward = (): void => setStep((s) => Math.min(CLOSING_STEP, s + 1));
   const choose = (choice: ConsentChoice): void => {
+    setSentChoice(choice);
     onChoice(choice);
     setStep(CLOSING_STEP);
   };
+
+  // The closing step reports the outcome, not the intent. An install can fail
+  // for reasons that have nothing to do with the click (the installer refuses
+  // to touch a settings.json it cannot parse), and congratulating the user
+  // then leaves them believing hooks are running when nothing was written.
+  // `null` is the window between the click and the server's hooksStatus —
+  // still optimistic, because the overwhelmingly common case is success and a
+  // "working…" flash on every install would be worse than a late correction.
+  const installFailed = sentChoice === 'install' && installOutcome === false;
 
   const titles = [
     'Welcome to Pixel Agents!',
     'Powered by Claude Code',
     headline,
-    "You're all set!",
+    installFailed ? "Hooks couldn't be installed" : "You're all set!",
   ];
 
   return (
     <div
-      className="absolute z-45"
-      style={{ ...wrapperStyle, visibility: measured || !greeter ? undefined : 'hidden' }}
+      className="absolute"
+      style={{
+        ...wrapperStyle,
+        zIndex: INTRO_BUBBLE_Z_INDEX,
+        visibility: measured || !greeter ? undefined : 'hidden',
+      }}
     >
       {/* Tail squares render BEFORE the panel so the bubble paints over any
           overlap when the head sits right under (or behind) the panel. */}
@@ -281,6 +308,13 @@ export function IntroBubble({
 
         {step === CLOSING_STEP && (
           <>
+            {installFailed ? (
+              <p className="text-sm m-0 mb-8">
+                Something went wrong writing to your Claude Code settings, so the office will watch
+                your sessions the slower way instead. Everything still works. You can retry any time
+                from Settings.
+              </p>
+            ) : null}
             <p className="text-sm m-0 mb-8">
               Enjoy your new office! Questions, ideas, or pixel art to show off? Come hang out in
               our Discord.

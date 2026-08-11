@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { HooksConsentRequest } from '../../../core/src/messages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
@@ -93,13 +94,18 @@ interface ExtensionMessageState {
   /** Actual install state (hooksStatus message) — false while first-run
    *  consent is pending, unlike hooksEnabled which defaults true. */
   hooksInstalled: boolean;
+  /** Bumped on every hooksStatus message. `hooksInstalled` alone cannot say
+   *  "the server answered": a failed install reports the same `false` it
+   *  already held, so nothing changes and no effect runs. The Intro needs the
+   *  ARRIVAL, not just the value, to tell a pending install from a failed one. */
+  hooksStatusSeq: number;
   hooksInfoShown: boolean;
   /** First-run consent ask (hooksConsentRequest message). Non-null while the
    *  server is waiting on an answer; carries the server's exact disclosure
-   *  copy so the modal renders the terms being approved, with no client-side
-   *  duplicate to drift. Cleared locally on answer/dismissal, and by a
-   *  hooksStatus installed=true (another surface or tab already installed). */
-  consentRequest: { headline: string; disclosure: string } | null;
+   *  copy so the Intro's consent step renders the terms being approved, with
+   *  no client-side duplicate to drift. Cleared locally on answer/dismissal,
+   *  and by a hooksStatus installed=true (another surface or tab installed). */
+  consentRequest: HooksConsentRequest | null;
   dismissConsentRequest: () => void;
   // Areas
   areaMappings: Record<string, string[]>;
@@ -140,11 +146,9 @@ export function useExtensionMessages(
   const [ghostHeadlessAgents, setGhostHeadlessAgentsState] = useState(false);
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInstalled, setHooksInstalled] = useState(false);
+  const [hooksStatusSeq, setHooksStatusSeq] = useState(0);
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
-  const [consentRequest, setConsentRequest] = useState<{
-    headline: string;
-    disclosure: string;
-  } | null>(null);
+  const [consentRequest, setConsentRequest] = useState<HooksConsentRequest | null>(null);
   const [areaMappings, setAreaMappings] = useState<Record<string, string[]>>({});
   const [showAreas, setShowAreas] = useState(false);
 
@@ -671,6 +675,7 @@ export function useExtensionMessages(
       } else if (msg.type === 'hooksStatus') {
         if (typeof msg.installed === 'boolean') {
           setHooksInstalled(msg.installed as boolean);
+          setHooksStatusSeq((n) => n + 1);
           if (msg.installed) {
             // The ask is moot once hooks are installed — the Settings toggle
             // or another connected tab granted consent while this dialog was
@@ -680,7 +685,11 @@ export function useExtensionMessages(
         }
       } else if (msg.type === 'hooksConsentRequest') {
         if (typeof msg.headline === 'string' && typeof msg.disclosure === 'string') {
-          setConsentRequest({ headline: msg.headline, disclosure: msg.disclosure });
+          setConsentRequest({
+            type: 'hooksConsentRequest',
+            headline: msg.headline,
+            disclosure: msg.disclosure,
+          });
         }
       } else if (msg.type === 'externalAssetDirectoriesUpdated') {
         if (Array.isArray(msg.dirs)) {
@@ -755,6 +764,7 @@ export function useExtensionMessages(
     setGhostHeadlessAgents: applyGhostHeadlessAgents,
     hooksEnabled,
     hooksInstalled,
+    hooksStatusSeq,
     setHooksEnabled,
     hooksInfoShown,
     consentRequest,

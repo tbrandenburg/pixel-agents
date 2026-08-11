@@ -1,5 +1,5 @@
 /**
- * Unit tests for the consent bubble's geometry — the pure half ConsentBubble
+ * Unit tests for the consent bubble's geometry — the pure half IntroBubble
  * renders verbatim. This is the code most likely to be wrong on a narrow
  * VS Code side panel (edge clamping, the tail chasing a clamped bubble, the
  * camera caps), and none of it needs a DOM to verify.
@@ -11,8 +11,8 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
-import type { ConsentBubbleFrame } from '../src/components/consentBubbleGeometry.js';
-import { computeConsentBubbleGeometry } from '../src/components/consentBubbleGeometry.js';
+import type { IntroBubbleFrame } from '../src/components/introBubbleGeometry.js';
+import { computeIntroBubbleGeometry } from '../src/components/introBubbleGeometry.js';
 import {
   CONSENT_BUBBLE_ANCHOR_RISE_WORLD,
   CONSENT_BUBBLE_EDGE_MARGIN_PX,
@@ -26,7 +26,7 @@ import { TILE_SIZE } from '../src/office/types.js';
 
 /** A roomy dpr-1, zoom-2, un-panned frame: a 20×11 map centered in an 800×600
  *  container, greeter mid-map, bubble already measured. Overridden per test. */
-function roomyFrame(overrides: Partial<ConsentBubbleFrame> = {}): ConsentBubbleFrame {
+function roomyFrame(overrides: Partial<IntroBubbleFrame> = {}): IntroBubbleFrame {
   return {
     layout: { cols: 20, rows: 11 },
     containerRect: { width: 800, height: 600 },
@@ -42,7 +42,7 @@ function roomyFrame(overrides: Partial<ConsentBubbleFrame> = {}): ConsentBubbleF
 
 test('anchors the bubble bottom-left up-right of the head in a roomy container', () => {
   const frame = roomyFrame();
-  const g = computeConsentBubbleGeometry(frame);
+  const g = computeIntroBubbleGeometry(frame);
 
   // Reproduce the projection by hand for this un-panned, dpr-1 frame.
   const mapW = frame.layout.cols * TILE_SIZE * frame.zoom;
@@ -57,7 +57,7 @@ test('anchors the bubble bottom-left up-right of the head in a roomy container',
 });
 
 test('clamps the bubble inside a container too small for the preferred spot', () => {
-  const g = computeConsentBubbleGeometry(
+  const g = computeIntroBubbleGeometry(
     roomyFrame({
       containerRect: { width: 320, height: 200 },
       bubbleWidth: 300,
@@ -74,7 +74,7 @@ test('clamps the bubble inside a container too small for the preferred spot', ()
 
 test('tail squares step from the bubble edge toward the head, shrinking', () => {
   const frame = roomyFrame();
-  const g = computeConsentBubbleGeometry(frame);
+  const g = computeIntroBubbleGeometry(frame);
 
   assert.equal(g.tailSquares.length, CONSENT_TAIL_STEPS.length);
 
@@ -111,7 +111,7 @@ test('keeps the tail attached when clamping moves the bubble away from the head'
     bubbleWidth: 300,
     bubbleHeight: 150,
   });
-  const g = computeConsentBubbleGeometry(frame);
+  const g = computeIntroBubbleGeometry(frame);
 
   // The head in wrapper coordinates.
   const mapW = frame.layout.cols * TILE_SIZE * frame.zoom;
@@ -138,14 +138,14 @@ test('keeps the tail attached when clamping moves the bubble away from the head'
 });
 
 test('unmeasured bubble (first frame): position is computed, tail waits', () => {
-  const g = computeConsentBubbleGeometry(roomyFrame({ bubbleWidth: 0, bubbleHeight: 0 }));
+  const g = computeIntroBubbleGeometry(roomyFrame({ bubbleWidth: 0, bubbleHeight: 0 }));
   assert.equal(g.tailSquares.length, 0, 'no tail to a box with no size');
   assert.ok(Number.isFinite(g.left) && Number.isFinite(g.top));
 });
 
 test('camera target sits up-right of the greeter in a roomy viewport', () => {
   const frame = roomyFrame();
-  const g = computeConsentBubbleGeometry(frame);
+  const g = computeIntroBubbleGeometry(frame);
 
   assert.ok(g.cameraTarget.x > frame.greeter.x, 'composition center is right of the character');
   // The down-shift is small relative to the bubble rise, so the target stays
@@ -154,7 +154,7 @@ test('camera target sits up-right of the greeter in a roomy viewport', () => {
 });
 
 test('camera x-offset is capped on a narrow viewport', () => {
-  const narrow = computeConsentBubbleGeometry(
+  const narrow = computeIntroBubbleGeometry(
     roomyFrame({ containerRect: { width: 240, height: 600 } }),
   );
   const cap = (240 / 2) * CONSENT_CAMERA_MAX_X_OFFSET_VIEWPORT_FRACTION; // width in world units × fraction
@@ -169,7 +169,7 @@ test('camera y-offset always keeps the character in view on a short viewport', (
     containerRect: { width: 800, height: 180 },
     bubbleHeight: 400,
   });
-  const g = computeConsentBubbleGeometry(frame);
+  const g = computeIntroBubbleGeometry(frame);
 
   // Uncapped, half the (rise + 400px-tall bubble) would center far above the
   // greeter and push it below the bottom edge. The cap guarantees at least

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { HooksConsentRequest } from '../../core/src/messages.js';
 import { toMajorMinor } from './changelogData.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
 import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
-import type { ConsentChoice } from './components/IntroBubble.js';
+import type { ConsentChoice, InstallOutcome } from './components/IntroBubble.js';
 import { IntroBubble } from './components/IntroBubble.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { SettingsModal } from './components/SettingsModal.js';
@@ -88,6 +89,7 @@ function App() {
     setGhostHeadlessAgents,
     hooksEnabled,
     hooksInstalled,
+    hooksStatusSeq,
     hooksInfoShown,
     consentRequest,
     dismissConsentRequest,
@@ -151,12 +153,29 @@ function App() {
   // tour renders off a SNAPSHOT of the request, and only an UNANSWERED tour
   // follows consentRequest back to null (that null then means a cross-window
   // install mooted the ask, and the tour should indeed vanish).
-  const [intro, setIntro] = useState<{ headline: string; disclosure: string } | null>(null);
+  const [intro, setIntro] = useState<HooksConsentRequest | null>(null);
   const introChoiceSentRef = useRef(false);
   useEffect(() => {
     if (consentRequest) setIntro(consentRequest);
     else if (!introChoiceSentRef.current) setIntro(null);
   }, [consentRequest]);
+
+  // Whether the install the tour asked for actually landed, for the closing
+  // step to report. Null while nothing has been sent or the server has not
+  // answered yet. The App owns this because the App is what sees hooksStatus;
+  // it is keyed on hooksStatusSeq rather than hooksInstalled because a FAILED
+  // install re-reports the same `false` the state already held — the value
+  // never changes, only the message arrives.
+  const [installOutcome, setInstallOutcome] = useState<InstallOutcome>(null);
+  const awaitingHooksStatusRef = useRef(false);
+  useEffect(() => {
+    if (!awaitingHooksStatusRef.current) return;
+    awaitingHooksStatusRef.current = false;
+    setInstallOutcome(hooksInstalled);
+    // hooksInstalled is read on the seq bump, deliberately not a dependency:
+    // only the ARRIVAL of a hooksStatus should settle the verdict.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hooksStatusSeq]);
 
   // Answer the Intro's consent step. The buttons send their exact choice and
   // the tour advances; closing (the X, Escape, Let's Go) goes through
@@ -164,11 +183,19 @@ function App() {
   // on the next open.
   const handleConsentChoice = useCallback((choice: ConsentChoice) => {
     introChoiceSentRef.current = true;
+    // Only an install has an outcome the closing step reports. A decline that
+    // writes nothing sends no hooksStatus back, so arming the wait for it
+    // would leave it armed for an unrelated status later. Clear any verdict a
+    // walked-back earlier answer left either way.
+    awaitingHooksStatusRef.current = choice === 'install';
+    setInstallOutcome(null);
     transport.send({ type: 'hooksConsentResponse', choice });
   }, []);
 
   const handleIntroClose = useCallback(() => {
     introChoiceSentRef.current = false;
+    awaitingHooksStatusRef.current = false;
+    setInstallOutcome(null);
     setIntro(null);
     dismissConsentRequest();
   }, [dismissConsentRequest]);
@@ -594,6 +621,7 @@ function App() {
           containerRef={containerRef}
           zoom={editor.zoom}
           panRef={editor.panRef}
+          installOutcome={installOutcome}
           onChoice={handleConsentChoice}
           onClose={handleIntroClose}
         />

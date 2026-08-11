@@ -121,8 +121,9 @@ describe('parseArgs', () => {
   });
 });
 
-// The TTY consent prompt is gone: first-run consent is asked in the app (the
-// server's hooksConsentRequest → the webview's ConsentModal). Its two pinned
+// The TTY consent prompt is gone: first-run consent is asked in the app, as
+// one step of the Intro (the server's hooksConsentRequest → the webview's
+// IntroBubble, whose consent step renders it verbatim). Its two pinned
 // semantics moved with it: "junk must never be read as approval" now lives in
 // clientMessageHandler.test.ts (an unrecognized hooksConsentResponse choice
 // writes nothing), and the disclosure-content pins live in consentCopy.test.ts

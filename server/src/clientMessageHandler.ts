@@ -2,10 +2,12 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
-import { readConfig, revokeHooksConsent, writeConfig } from './configPersistence.js';
+import { readConfig, writeConfig } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
-import { consentActionFor, hooksConsentRequest } from './providers/hook/claude/consentGate.js';
+import type { ConsentEffects } from './providers/hook/claude/consentExecutor.js';
+import { applyConsentChoice } from './providers/hook/claude/consentExecutor.js';
+import { hooksConsentRequest } from './providers/hook/claude/consentGate.js';
 import { claudeProvider } from './providers/index.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
@@ -197,7 +199,7 @@ export function handleClientMessage(
         );
         break;
       }
-      void applyConsentChoice(ctx, send, msg.choice);
+      void applyConsentChoice(msg.choice, standaloneConsentEffects(ctx, send));
       break;
     }
 
@@ -281,57 +283,30 @@ async function applyHooksPreference(
 }
 
 /**
- * Act on a (privileged) hooksConsentResponse. The choice→action rule lives in
- * consentGate (shared with the VS Code surface); this only carries out the
- * chosen action. `installed` is read fresh off the disk because the Intro lets
- * the user walk back and REVISE an already-sent answer — what a decline means
- * depends on whether the earlier Install actually landed. An unreadable
- * settings file degrades to installed=false, which maps every choice to its
- * no-file-touch variant (fail closed: never uninstall on a guess).
+ * This surface's half of carrying out a consent answer. Both the choice→action
+ * rule and the order of the writes live in the shared consent modules; only
+ * the effects below are standalone-specific (store adapter, console, socket).
  */
-async function applyConsentChoice(
-  ctx: ClientMessageContext,
-  send: WsSend,
-  choice: unknown,
-): Promise<void> {
-  const adapter = ctx.store.getAdapter();
-  const installed = await claudeProvider.areHooksInstalled().catch(() => false);
-  switch (consentActionFor(choice, installed)) {
-    case 'install':
-      // Clicking Install IS the consent grant: onSetHooksEnabled(true)
-      // calls grantHooksConsent() before installing (cli.ts), exactly like
-      // the Settings toggle — so this is that same path.
-      await applyHooksPreference(ctx, send, true);
-      break;
-    case 'disable':
-      // A revised "never" over a landed install: the full toggle-off path —
-      // uninstall first, persist hooks-off only once the disk agrees.
-      await applyHooksPreference(ctx, send, false);
-      break;
-    case 'revert': {
-      // A revised "not now" over a landed install: undo it entirely. The
-      // uninstall runs through the same side effect as the toggle, but the
-      // preference is left alone and the consent grant is revoked instead —
-      // "not now" must leave the world exactly as if never answered, so the
-      // ask comes back on the next open.
+function standaloneConsentEffects(ctx: ClientMessageContext, send: WsSend): ConsentEffects {
+  return {
+    setHooksEnabled: (enabled) => applyHooksPreference(ctx, send, enabled),
+    uninstallHooks: async () => {
+      // The same side effect the toggle runs, minus the preference write.
       await ctx.onSetHooksEnabled?.(false);
-      const stillInstalled = await claudeProvider.areHooksInstalled().catch(() => true);
-      if (!stillInstalled) revokeHooksConsent();
-      send({ type: 'hooksStatus', installed: stillInstalled });
-      console.log('[Pixel Agents] Hook install undone — you will be asked again next time.');
-      break;
-    }
-    case 'persistOff':
-      adapter?.setSetting(KEY_HOOKS_ENABLED, false);
+    },
+    areHooksInstalled: () => claudeProvider.areHooksInstalled(),
+    persistHooksOff: () => {
+      ctx.store.getAdapter()?.setSetting(KEY_HOOKS_ENABLED, false);
       if (ctx.runtime) ctx.runtime.hooksEnabled.current = false;
-      console.log('[Pixel Agents] Hooks disabled. Re-enable them any time in the UI settings.');
-      break;
-    case 'none':
-      console.log(
-        '[Pixel Agents] Skipping hook install for this run — you will be asked again next time.',
-      );
-      break;
-  }
+    },
+    reportHooksStatus: async () => {
+      try {
+        send({ type: 'hooksStatus', installed: await claudeProvider.areHooksInstalled() });
+      } catch {
+        // Never let a status broadcast mask the error already surfaced.
+      }
+    },
+  };
 }
 
 function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {

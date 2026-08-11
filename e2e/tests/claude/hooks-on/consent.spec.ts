@@ -357,6 +357,60 @@ test.describe('Hooks consent gate', () => {
     narrator.check('Settings shows Instant Detection OFF');
   });
 
+  // The population issue #377 is about: a settings.json we refuse to touch.
+  // Two things have to hold when Install fails on it.
+  //
+  // 1. The closing step must not congratulate. It reports the OUTCOME, not the
+  //    click, or the user walks away believing hooks are running over a file
+  //    that was never written.
+  // 2. The ask has to be recoverable. Install records the grant BEFORE it
+  //    writes, so a failed install leaves a grant with nothing on disk — and
+  //    the grant alone retires the ask forever. A revised "Not Now" must take
+  //    that grant back.
+  test.describe('when settings.json cannot be parsed', () => {
+    test.use({ seedClaudeSettings: '{ "permissions": { "allow": [ "Bash(ls:*)" ]' });
+
+    test('a failed install is reported, and Not Now brings the ask back @area:cross-cutting', async ({
+      pixelAgents,
+    }) => {
+      const { frame, tmpHome, narrator } = pixelAgents;
+
+      const dialog = await openConsentDialog(frame);
+      await advanceIntroToConsentStep(dialog);
+
+      narrator.step('clicking Install Hooks over an unparseable settings.json');
+      await dialog.getByRole('button', { name: 'Install Hooks' }).click();
+
+      // The installer refuses to rewrite a shape it cannot read, so nothing of
+      // ours reaches the file — and the closing step says so rather than
+      // claiming success.
+      await expect(dialog).toContainText("Hooks couldn't be installed", { timeout: 15_000 });
+      await expect(dialog).not.toContainText("You're all set!");
+      expect(ourHookEvents(tmpHome)).toEqual([]);
+      narrator.check('the closing step reports the failure instead of congratulating');
+
+      // The user's file is exactly as they left it — not repaired, not replaced.
+      expect(fs.readFileSync(settingsPath(tmpHome), 'utf8')).toBe(
+        '{ "permissions": { "allow": [ "Bash(ls:*)" ]',
+      );
+      narrator.check('the unparseable file was left byte-for-byte alone');
+
+      narrator.step('walking back and revising to Not Now');
+      await dialog.getByRole('button', { name: 'Back' }).click();
+      await expect(dialog.getByRole('button', { name: 'Install Hooks' })).toBeVisible();
+      await dialog.getByRole('button', { name: 'Not Now' }).click();
+      await finishIntro(dialog);
+
+      // The load-bearing half: the grant the failed install left is taken back,
+      // so the whole Intro returns on the next open. Keying the revert off
+      // "are hooks installed" saw nothing to undo here and left the user with
+      // an ask that never came back.
+      await expect.poll(() => readConsent(tmpHome), { timeout: 15_000 }).toBe(false);
+      expect(readHooksEnabled(tmpHome)).not.toBe(false);
+      narrator.check('the grant is revoked and hooks-off is not persisted — the ask returns');
+    });
+  });
+
   // A stray click on the office around the bubble must not read as an answer —
   // OR as an abort. This is a decision surface: only the bubble's own buttons
   // and Escape do anything at all. The office is live behind the tour (that is
