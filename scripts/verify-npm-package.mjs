@@ -106,7 +106,7 @@ async function verifyInstalledTarball(tarballPath) {
   // consent in the throwaway smoke HOME intentionally bypasses the gate: this
   // test verifies the install MACHINERY ships and works, not the gate (the
   // gate's own behavior is pinned by server/__tests__/cli.test.ts,
-  // clientMessageHandler.test.ts, and the consent e2e specs). Same shape as
+  // consentFlow.test.ts, and the consent e2e specs). Same shape as
   // server/__tests__/cli.test.ts.
   fs.mkdirSync(path.join(smokeHome, '.pixel-agents'), { recursive: true });
   fs.writeFileSync(

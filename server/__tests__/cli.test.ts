@@ -125,7 +125,7 @@ describe('parseArgs', () => {
 // one step of the Intro (the server's hooksConsentRequest → the webview's
 // IntroBubble, whose consent step renders it verbatim). Its two pinned
 // semantics moved with it: "junk must never be read as approval" now lives in
-// clientMessageHandler.test.ts (an unrecognized hooksConsentResponse choice
+// consentFlow.test.ts (an unrecognized hooksConsentResponse choice
 // writes nothing), and the disclosure-content pins live in consentCopy.test.ts
 // plus the handshake test asserting the request carries that copy verbatim.
 

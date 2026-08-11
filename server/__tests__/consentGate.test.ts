@@ -15,7 +15,7 @@ import { consentActionFor, hooksConsentRequest } from '../src/providers/hook/cla
  * has something to fail against.
  *
  * The behaviour reached THROUGH each surface stays pinned where it was —
- * clientMessageHandler.test.ts for standalone, consent.spec.ts for VS Code.
+ * consentFlow.test.ts for standalone, consent.spec.ts for VS Code.
  */
 describe('hooksConsentRequest — when to ask', () => {
   const askable = {
