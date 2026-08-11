@@ -450,10 +450,15 @@ function settingsHoldOnlyOurHooks(settings: ClaudeSettings): boolean {
   if (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return false;
   }
-  const reference = makeHookEntry() as unknown as Record<string, unknown>;
-  const referenceHook = (reference.hooks as Record<string, unknown>[])[0];
-  const matchesReference = (value: unknown, refValue: unknown): boolean =>
-    JSON.stringify(value) === JSON.stringify(refValue);
+  const reference = makeHookEntry();
+  // Maps rather than index access: `has` distinguishes "the writer has no such
+  // field" (an unknown field on the entry — not ours) from "the writer's value
+  // is undefined", and neither needs a cast to an index-signature type.
+  const referenceFields = new Map<string, unknown>(Object.entries(reference));
+  const referenceHookFields = new Map<string, unknown>(Object.entries(reference.hooks[0]));
+  const matchesWriter = (fields: Map<string, unknown>, key: string, value: unknown): boolean =>
+    fields.has(key) && deepEqual(value, fields.get(key));
+
   for (const entries of Object.values(hooks)) {
     // An empty event array is not ours: install always fills the key it adds,
     // and uninstall deletes a key its own removal emptied.
@@ -462,19 +467,43 @@ function settingsHoldOnlyOurHooks(settings: ClaudeSettings): boolean {
       if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
       for (const [key, value] of Object.entries(entry)) {
         if (key === 'hooks') continue; // compared hook-by-hook below
-        if (!matchesReference(value, reference[key])) return false;
+        if (!matchesWriter(referenceFields, key, value)) return false;
       }
       if (!Array.isArray(entry.hooks) || entry.hooks.length === 0) return false;
       for (const hook of entry.hooks) {
         if (!isOurHook(hook)) return false;
         for (const [key, value] of Object.entries(hook)) {
           if (key === 'command' || key === 'timeout') continue; // vary across installs
-          if (!matchesReference(value, referenceHook[key])) return false;
+          if (!matchesWriter(referenceHookFields, key, value)) return false;
         }
       }
     }
   }
   return true;
+}
+
+/** Structural equality for parsed-JSON values.
+ *
+ *  Deliberately not `JSON.stringify(a) === JSON.stringify(b)`: that compares
+ *  SERIALIZATIONS, so it is sensitive to key order, and two objects a user's
+ *  editor happened to write in a different order would read as different
+ *  values. The only judgement this predicate exists to make is "is this the
+ *  same value our writer produces", and key order is not part of a value. */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, i) => deepEqual(item, b[i]));
+  }
+  const aEntries = Object.entries(a);
+  const bKeys = new Set(Object.keys(b));
+  return (
+    aEntries.length === bKeys.size &&
+    aEntries.every(
+      ([key, value]) => bKeys.has(key) && deepEqual(value, (b as Record<string, unknown>)[key]),
+    )
+  );
 }
 
 /** "This entry held only our hooks and is now empty — drop it."

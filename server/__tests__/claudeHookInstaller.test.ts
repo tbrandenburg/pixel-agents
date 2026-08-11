@@ -423,6 +423,43 @@ describe('claudeHookInstaller', () => {
     expect(JSON.stringify(backedUp.hooks.Stop)).toContain('their-tool --observe');
   });
 
+  // 8c-5. Key order is not part of a value: an editor, a formatter, or a hand
+  //       edit that rewrites our own entries with the keys in a different
+  //       order has changed nothing about what the file SAYS, so the skip must
+  //       still apply.
+  //
+  //       Note what this does and does not pin. Today it passes against a
+  //       stringify-based comparison too, because every field the predicate
+  //       compares is a scalar (`hooks` is compared separately, element by
+  //       element) and scalars serialize identically in any order. The
+  //       key-order sensitivity is a TRAP rather than a live bug — it arms
+  //       itself the day makeHookEntry() grows a field with an object value,
+  //       at which point a reordered copy of our own output would read as user
+  //       content and enshrine it as "the user's original". The predicate
+  //       compares values structurally so that day never arrives; this test is
+  //       the standing guard for it.
+  it('creates no backup when our own entries are re-serialized in another key order', async () => {
+    const settingsPath = settingsPathFor();
+    const backupPath = settingsPath + SETTINGS_BACKUP_SUFFIX;
+    await installHooks();
+
+    const reordered = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    for (const event of Object.keys(reordered.hooks)) {
+      reordered.hooks[event] = reordered.hooks[event].map(
+        (entry: { matcher: string; hooks: Array<Record<string, unknown>> }) => ({
+          // Same values, opposite key order — `hooks` before `matcher`, and
+          // `timeout`/`command`/`type` reversed inside each hook.
+          hooks: entry.hooks.map((h) => ({ timeout: h.timeout, command: h.command, type: h.type })),
+          matcher: entry.matcher,
+        }),
+      );
+    }
+    fs.writeFileSync(settingsPath, JSON.stringify(reordered, null, 2));
+
+    await uninstallHooks();
+    expect(fs.existsSync(backupPath)).toBe(false);
+  });
+
   // ── W1: the write path throws instead of logging ──────────────
   //
   // A swallowed write error used to leave callers logging "Hooks installed"
