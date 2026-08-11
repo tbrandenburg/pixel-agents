@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { isDeepStrictEqual } from 'util';
 
 import { HOOK_SCRIPTS_DIR } from '../../../constants.js';
 import {
@@ -456,8 +457,11 @@ function settingsHoldOnlyOurHooks(settings: ClaudeSettings): boolean {
   // is undefined", and neither needs a cast to an index-signature type.
   const referenceFields = new Map<string, unknown>(Object.entries(reference));
   const referenceHookFields = new Map<string, unknown>(Object.entries(reference.hooks[0]));
+  // isDeepStrictEqual, not stringify-compare: two objects a user's editor
+  // wrote with keys in a different order are the same VALUE, and key order is
+  // not part of a value.
   const matchesWriter = (fields: Map<string, unknown>, key: string, value: unknown): boolean =>
-    fields.has(key) && deepEqual(value, fields.get(key));
+    fields.has(key) && isDeepStrictEqual(value, fields.get(key));
 
   for (const entries of Object.values(hooks)) {
     // An empty event array is not ours: install always fills the key it adds,
@@ -480,30 +484,6 @@ function settingsHoldOnlyOurHooks(settings: ClaudeSettings): boolean {
     }
   }
   return true;
-}
-
-/** Structural equality for parsed-JSON values.
- *
- *  Deliberately not `JSON.stringify(a) === JSON.stringify(b)`: that compares
- *  SERIALIZATIONS, so it is sensitive to key order, and two objects a user's
- *  editor happened to write in a different order would read as different
- *  values. The only judgement this predicate exists to make is "is this the
- *  same value our writer produces", and key order is not part of a value. */
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a) && Array.isArray(b)) {
-    return a.length === b.length && a.every((item, i) => deepEqual(item, b[i]));
-  }
-  const aEntries = Object.entries(a);
-  const bKeys = new Set(Object.keys(b));
-  return (
-    aEntries.length === bKeys.size &&
-    aEntries.every(
-      ([key, value]) => bKeys.has(key) && deepEqual(value, (b as Record<string, unknown>)[key]),
-    )
-  );
 }
 
 /** "This entry held only our hooks and is now empty — drop it."
