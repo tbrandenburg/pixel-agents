@@ -20,16 +20,25 @@ import { consentActionFor } from './consentGate.js';
 
 /** The per-surface half of carrying out an answer. Each method is the surface's
  *  existing path, not a new one written for consent: the whole point is that a
- *  consent answer and the Settings toggle take the SAME route. */
+ *  consent answer and the Settings toggle take the SAME route.
+ *
+ *  The failure contract, uniform across methods and surfaces: every method
+ *  SURFACES its own failure the surface's way (VS Code an error modal,
+ *  standalone the console) and resolves — it never rejects. Answers are
+ *  dispatched fire-and-forget on both surfaces, so a rejection would reach no
+ *  one; the executor keeps a catch-and-log backstop, but that backstop firing
+ *  means an effect broke this contract. The one exception is
+ *  `areHooksInstalled`, which MAY reject — the executor catches it at each
+ *  call site with the fail-closed fallback for that decision. */
 export interface ConsentEffects {
   /** The full Settings-toggle path: install or uninstall, then persist the
    *  preference only when the resulting on-disk state agrees, then report it. */
   setHooksEnabled(enabled: boolean): Promise<void>;
-  /** Uninstall WITHOUT touching the persisted preference. Surfaces its own
-   *  failure to the user; never throws. */
+  /** Uninstall WITHOUT touching the persisted preference. */
   uninstallHooks(): Promise<void>;
-  /** Read the on-disk truth. Never throws — an unreadable settings.json
-   *  resolves to the value the caller passes as its fallback. */
+  /** Read the on-disk truth. May reject (an unreadable settings file) — the
+   *  one method exempted from the never-reject contract above, because only
+   *  the call site knows which way a given decision fails closed. */
   areHooksInstalled(): Promise<boolean>;
   /** Persist hooks-off without going near settings.json. */
   persistHooksOff(): void;
@@ -63,13 +72,18 @@ let consentQueue: Promise<void> = Promise.resolve();
  * means depends on what the previous answer actually left on disk.
  */
 export function applyConsentChoice(choice: unknown, effects: ConsentEffects): Promise<void> {
-  const next = consentQueue.then(() => runConsentChoice(choice, effects));
-  // The queue must survive a rejected action, or one failure blocks every
-  // later answer. The rejection still reaches this call's own caller.
-  consentQueue = next.then(
-    () => undefined,
-    () => undefined,
+  const next = consentQueue.then(() =>
+    runConsentChoice(choice, effects).catch((err: unknown) => {
+      // Backstop, not a handler: the ConsentEffects contract is that every
+      // effect surfaces its own failure and resolves, so nothing should reach
+      // this catch. It exists because both surfaces fire-and-forget the
+      // returned promise — a rejection escaping here would surface nowhere but
+      // an unhandled-rejection crash log, and one broken effect must not block
+      // every later answer in the queue.
+      console.error('[Pixel Agents] Consent action failed:', err);
+    }),
   );
+  consentQueue = next;
   return next;
 }
 

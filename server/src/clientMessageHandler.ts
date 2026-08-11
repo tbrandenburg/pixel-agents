@@ -265,21 +265,32 @@ export function handleClientMessage(
  *
  * Shared by the Settings toggle and the consent dialog's Install button; both
  * are consent grants (onSetHooksEnabled(true) calls grantHooksConsent()).
+ *
+ * Never rejects: the setHooksEnabled dispatch fires-and-forgets it, and as the
+ * consent executor's `setHooksEnabled` effect it is bound by the ConsentEffects
+ * never-reject contract — so a failure is surfaced here (the console is this
+ * surface's error channel) or nowhere. Mirrors the VS Code path, which also
+ * skips both the persist and the status report when the re-derive fails:
+ * neither is worth doing on a guess.
  */
 async function applyHooksPreference(
   ctx: ClientMessageContext,
   send: WsSend,
   enabled: boolean,
 ): Promise<void> {
-  await ctx.onSetHooksEnabled?.(enabled);
-  const installed = await claudeProvider.areHooksInstalled();
-  if (installed === enabled) {
-    ctx.store.getAdapter()?.setSetting(KEY_HOOKS_ENABLED, enabled);
-    if (ctx.runtime) ctx.runtime.hooksEnabled.current = enabled;
+  try {
+    await ctx.onSetHooksEnabled?.(enabled);
+    const installed = await claudeProvider.areHooksInstalled();
+    if (installed === enabled) {
+      ctx.store.getAdapter()?.setSetting(KEY_HOOKS_ENABLED, enabled);
+      if (ctx.runtime) ctx.runtime.hooksEnabled.current = enabled;
+    }
+    // Always report the ACTUAL install state — the toggle expresses intent,
+    // not outcome (the installer refuses to touch an unparseable file).
+    send({ type: 'hooksStatus', installed });
+  } catch (err) {
+    console.error('[Pixel Agents] Applying the hooks preference failed:', err);
   }
-  // Always report the ACTUAL install state — the toggle expresses intent,
-  // not outcome (the installer refuses to touch an unparseable file).
-  send({ type: 'hooksStatus', installed });
 }
 
 /**
@@ -291,8 +302,14 @@ function standaloneConsentEffects(ctx: ClientMessageContext, send: WsSend): Cons
   return {
     setHooksEnabled: (enabled) => applyHooksPreference(ctx, send, enabled),
     uninstallHooks: async () => {
-      // The same side effect the toggle runs, minus the preference write.
-      await ctx.onSetHooksEnabled?.(false);
+      // The same side effect the toggle runs, minus the preference write. The
+      // catch keeps the never-reject contract true by construction — the host
+      // callback's own contract is unstated.
+      try {
+        await ctx.onSetHooksEnabled?.(false);
+      } catch (err) {
+        console.error('[Pixel Agents] Hook uninstall failed:', err);
+      }
     },
     areHooksInstalled: () => claudeProvider.areHooksInstalled(),
     persistHooksOff: () => {
