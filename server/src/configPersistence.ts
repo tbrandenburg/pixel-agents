@@ -164,6 +164,19 @@ export function grantHooksConsent(): void {
   }
 }
 
+/** Un-record the approval. Used when the user walks the Intro back from its
+ *  closing step and revises an already-sent Install down to "Not Now": the
+ *  install is undone, and the recorded grant must go with it or the ask never
+ *  comes back (the consent gate reads a recorded grant as asked-and-answered
+ *  forever). Callers only revoke after the uninstall verifiably landed. */
+export function revokeHooksConsent(): void {
+  const cfg = readConfig();
+  if (cfg.hooksConsentGiven) {
+    cfg.hooksConsentGiven = false;
+    writeConfig(cfg);
+  }
+}
+
 /** Called on extension uninstall: return every hooks-related choice to factory
  *  state — consent revoked, hooksEnabled/hooksInfoShown back to defaults in
  *  both namespaces. The choices belonged to an installation that no longer

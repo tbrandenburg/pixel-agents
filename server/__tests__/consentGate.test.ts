@@ -60,19 +60,41 @@ describe('hooksConsentRequest — when to ask', () => {
 });
 
 describe('consentActionFor — what an answer means', () => {
-  it('installs on an exact install', () => {
-    expect(consentActionFor('install')).toBe('install');
+  // The Intro lets the user walk back from the closing step and revise an
+  // already-sent answer, so a choice is an absolute statement of desired
+  // state: what a decline maps to depends on whether our hooks are on disk
+  // right now (they are exactly when an earlier Install landed).
+  it('installs on an exact install, whether or not hooks are on disk', () => {
+    expect(consentActionFor('install', false)).toBe('install');
+    expect(consentActionFor('install', true)).toBe('install');
   });
 
-  it('persists hooks-off on an exact never', () => {
-    expect(consentActionFor('never')).toBe('persistOff');
+  it('persists hooks-off on an exact never with nothing installed', () => {
+    expect(consentActionFor('never', false)).toBe('persistOff');
   });
 
-  // notNow and every unrecognized value are the SAME action: write nothing and
-  // ask again. Junk must never be read as approval — or as a durable decline,
-  // which would silently retire the ask on a malformed message.
+  // A revised "never" over a landed install must remove the hooks, not merely
+  // record a preference beside them — a persisted hooks-off over live entries
+  // is the stranding bug: entries firing, checkbox lying, gate skipped.
+  it('takes the full toggle-off path on a never over a landed install', () => {
+    expect(consentActionFor('never', true)).toBe('disable');
+  });
+
+  it('writes nothing on a notNow with nothing installed', () => {
+    expect(consentActionFor('notNow', false)).toBe('none');
+  });
+
+  // A revised "not now" over a landed install must leave the world exactly as
+  // if never answered: uninstall AND revoke the recorded grant, so the ask
+  // genuinely comes back on the next open.
+  it('reverts the install on a notNow over a landed install', () => {
+    expect(consentActionFor('notNow', true)).toBe('revert');
+  });
+
+  // Every unrecognized value writes nothing — installed or not. Junk must
+  // never be read as approval, as a durable decline (which would silently
+  // retire the ask on a malformed message), or as an uninstall trigger.
   it.each([
-    'notNow',
     'yes',
     'y',
     '',
@@ -80,6 +102,7 @@ describe('consentActionFor — what an answer means', () => {
     'INSTALL',
     'installl',
     'not-now',
+    'notnow',
     'NEVER',
     'never ',
     42,
@@ -89,6 +112,7 @@ describe('consentActionFor — what an answer means', () => {
     {},
     ['install'],
   ])('writes nothing for %j', (junk) => {
-    expect(consentActionFor(junk)).toBe('none');
+    expect(consentActionFor(junk, false)).toBe('none');
+    expect(consentActionFor(junk, true)).toBe('none');
   });
 });

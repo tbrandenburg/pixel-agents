@@ -54,25 +54,45 @@ export function hooksConsentRequest(state: ConsentGateState): HooksConsentReques
 }
 
 /** What the server should DO about an answer.
- *  - `install`: grant consent and install, the same path as the Settings toggle.
- *  - `persistOff`: persist hooks-off and write nothing to settings.json —
- *    nothing of ours is installed when this dialog shows, so there is nothing
- *    to remove and no reason to touch the file (or to fail on an unparseable
- *    one while merely declining).
- *  - `none`: write nothing at all; the ask fires again on the next connect. */
-export type ConsentAction = 'install' | 'persistOff' | 'none';
+ *
+ *  The Intro lets the user walk BACK from the closing step and change an
+ *  already-sent answer, so a choice is an absolute statement of the state the
+ *  user wants — not a one-shot event. Which action a decline maps to therefore
+ *  depends on whether our hooks are on disk right now (they are exactly when
+ *  an earlier `install` from this ask landed, or another surface installed):
+ *
+ *  - `install`: grant consent and install, the same path as the Settings
+ *    toggle. Idempotent, so a repeated install is safe.
+ *  - `persistOff` (never, nothing installed): persist hooks-off and write
+ *    nothing to settings.json — there is nothing to remove and no reason to
+ *    touch the file (or to fail on an unparseable one while merely declining).
+ *  - `disable` (never, ours installed): the full Settings toggle-off path —
+ *    uninstall, then persist hooks-off only after the on-disk result agrees.
+ *    Without this, a revised "never" would leave live hooks behind a
+ *    persisted hooks-off: entries firing, checkbox lying, gate skipped.
+ *  - `revert` (notNow, ours installed): uninstall and revoke the consent
+ *    grant, leaving the hooks preference alone — "not now" means the ask
+ *    should come back, and a recorded grant (or a persisted off) would
+ *    silently retire it.
+ *  - `none` (notNow, nothing installed — and every junk value): write nothing
+ *    at all; the ask fires again on the next connect. */
+export type ConsentAction = 'install' | 'persistOff' | 'disable' | 'revert' | 'none';
 
 /**
  * Fail-closed on exact matches. Only the literal `'install'` approves and only
  * the literal `'never'` declines durably; `'notNow'`, a dismissal that sends
  * nothing, a truncated payload, and any value a crafted message could carry
- * all fall through to `none`.
+ * all fall through to the no-write actions.
  *
- * `unknown` is the honest parameter type: this runs on a wire message, and
- * narrowing it here is the point of the function.
+ * `unknown` is the honest parameter type for `choice`: this runs on a wire
+ * message, and narrowing it here is the point of the function. `installed` is
+ * the on-disk truth (areHooksInstalled) at the moment the answer arrives —
+ * callers that cannot read it pass false, which degrades every choice to its
+ * no-file-touch variant.
  */
-export function consentActionFor(choice: unknown): ConsentAction {
+export function consentActionFor(choice: unknown, installed: boolean): ConsentAction {
   if (choice === 'install') return 'install';
-  if (choice === 'never') return 'persistOff';
+  if (choice === 'never') return installed ? 'disable' : 'persistOff';
+  if (choice === 'notNow') return installed ? 'revert' : 'none';
   return 'none';
 }

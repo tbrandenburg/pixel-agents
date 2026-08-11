@@ -653,6 +653,104 @@ describe('clientMessageHandler: hooks consent flow', () => {
       expect(configJsonExists()).toBe(false);
     });
   });
+
+  // ── hooksConsentResponse revisions: Back from the Intro's closing step ───
+  //
+  // The Intro lets the user return to the consent step after an Install
+  // already landed and pick a decline instead. A choice is an absolute
+  // statement of desired state, so a decline over live hooks must UNDO the
+  // install — recording a preference beside live entries is the stranding
+  // bug (entries firing, checkbox lying, gate skipped forever).
+  describe('hooksConsentResponse revision over a landed install', () => {
+    /** What a successful uninstall leaves behind. */
+    function removeOurHooks(): void {
+      fs.writeFileSync(
+        path.join(tempHome, '.claude', 'settings.json'),
+        JSON.stringify({ hooks: {} }),
+      );
+    }
+
+    it('a revised never takes the full toggle-off path: uninstall, then persist off', async () => {
+      seedInstalledHooks();
+      grantHooksConsent(); // the earlier Install recorded the grant
+      let sideEffectEnabled: boolean | undefined;
+      ctx.onSetHooksEnabled = (enabled) => {
+        sideEffectEnabled = enabled;
+        if (!enabled) removeOurHooks();
+      };
+
+      handleClientMessage(
+        { type: 'hooksConsentResponse', choice: 'never' },
+        (m) => sent.push(m),
+        ctx,
+      );
+      await settle();
+
+      expect(sideEffectEnabled).toBe(false);
+      expect(store.getAdapter()!.getSetting('pixel-agents.hooksEnabled', true)).toBe(false);
+      // The grant stays recorded, matching the Settings toggle: re-enabling
+      // later installs without re-asking.
+      expect(consentGiven()).toBe(true);
+      expect(sent.find((m) => m.type === 'hooksStatus')).toEqual({
+        type: 'hooksStatus',
+        installed: false,
+      });
+    });
+
+    it('a revised notNow reverts everything: uninstall, revoke the grant, preference untouched', async () => {
+      seedInstalledHooks();
+      grantHooksConsent();
+      ctx.onSetHooksEnabled = (enabled) => {
+        if (!enabled) removeOurHooks();
+      };
+
+      handleClientMessage(
+        { type: 'hooksConsentResponse', choice: 'notNow' },
+        (m) => sent.push(m),
+        ctx,
+      );
+      await settle();
+
+      expect(consentGiven()).toBe(false);
+      // "Not now" must not persist hooks-off — that would retire the ask.
+      expect(store.getAdapter()!.getSetting('pixel-agents.hooksEnabled', true)).toBe(true);
+      expect(sent.find((m) => m.type === 'hooksStatus')).toEqual({
+        type: 'hooksStatus',
+        installed: false,
+      });
+
+      // The load-bearing half: the world is as if never answered, so the next
+      // connect asks again.
+      sent = [];
+      await connect();
+      expect(sent.find((m) => m.type === 'hooksConsentRequest')).toBeDefined();
+    });
+
+    // Fail closed on a failed undo: while entries are still on disk and still
+    // firing, the grant must stay recorded — a revoked grant over live hooks
+    // would make the startup migration re-grant silently, but the truthful
+    // hooksStatus is what the UI renders either way.
+    it('a failed revert keeps the grant and reports hooks still installed', async () => {
+      seedInstalledHooks();
+      grantHooksConsent();
+      ctx.onSetHooksEnabled = () => {
+        /* the uninstall failed: our entries stay */
+      };
+
+      handleClientMessage(
+        { type: 'hooksConsentResponse', choice: 'notNow' },
+        (m) => sent.push(m),
+        ctx,
+      );
+      await settle();
+
+      expect(consentGiven()).toBe(true);
+      expect(sent.find((m) => m.type === 'hooksStatus')).toEqual({
+        type: 'hooksStatus',
+        installed: true,
+      });
+    });
+  });
 });
 
 describe('clientMessageHandler: saveAgentSeats palette sync', () => {
