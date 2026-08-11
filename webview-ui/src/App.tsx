@@ -4,10 +4,10 @@ import { toMajorMinor } from './changelogData.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
-import type { ConsentChoice } from './components/ConsentBubble.js';
-import { ConsentBubble } from './components/ConsentBubble.js';
 import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
+import type { ConsentChoice } from './components/IntroBubble.js';
+import { IntroBubble } from './components/IntroBubble.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
@@ -145,16 +145,33 @@ function App() {
     transport.send({ type: 'focusAgent', id });
   }, []);
 
-  // Answer the first-run hooks consent dialog. The buttons send their exact
-  // choice; dismissal (Escape) goes through dismissConsentRequest alone and
-  // sends nothing, so the server asks again on the next open.
-  const handleConsentChoice = useCallback(
-    (choice: ConsentChoice) => {
-      transport.send({ type: 'hooksConsentResponse', choice });
-      dismissConsentRequest();
-    },
-    [dismissConsentRequest],
-  );
+  // The Intro outlives the ask that opened it. A consent-step choice makes the
+  // server answer with hooksStatus, which (via the moot path) clears
+  // consentRequest — but the tour must keep going to its closing step. So the
+  // tour renders off a SNAPSHOT of the request, and only an UNANSWERED tour
+  // follows consentRequest back to null (that null then means a cross-window
+  // install mooted the ask, and the tour should indeed vanish).
+  const [intro, setIntro] = useState<{ headline: string; disclosure: string } | null>(null);
+  const introChoiceSentRef = useRef(false);
+  useEffect(() => {
+    if (consentRequest) setIntro(consentRequest);
+    else if (!introChoiceSentRef.current) setIntro(null);
+  }, [consentRequest]);
+
+  // Answer the Intro's consent step. The buttons send their exact choice and
+  // the tour advances; closing (the X, Escape, Let's Go) goes through
+  // handleIntroClose alone and sends nothing, so an unanswered ask fires again
+  // on the next open.
+  const handleConsentChoice = useCallback((choice: ConsentChoice) => {
+    introChoiceSentRef.current = true;
+    transport.send({ type: 'hooksConsentResponse', choice });
+  }, []);
+
+  const handleIntroClose = useCallback(() => {
+    introChoiceSentRef.current = false;
+    setIntro(null);
+    dismissConsentRequest();
+  }, [dismissConsentRequest]);
 
   // Mutate folder→Area mappings locally + send to server. Updates OfficeState in
   // the same tick so a follow-up agentCreated picks up the new mapping.
@@ -569,16 +586,16 @@ function App() {
         <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
       )}
 
-      {consentRequest && (
-        <ConsentBubble
+      {intro && (
+        <IntroBubble
           officeState={officeState}
-          headline={consentRequest.headline}
-          disclosure={consentRequest.disclosure}
+          headline={intro.headline}
+          disclosure={intro.disclosure}
           containerRef={containerRef}
           zoom={editor.zoom}
           panRef={editor.panRef}
           onChoice={handleConsentChoice}
-          onDismiss={dismissConsentRequest}
+          onClose={handleIntroClose}
         />
       )}
     </div>

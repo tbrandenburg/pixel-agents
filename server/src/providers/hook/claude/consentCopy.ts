@@ -1,14 +1,15 @@
 /**
  * Disclosure text for the hooks consent gate. Both surfaces show the SAME
  * in-app ask: the server ships these strings in the `hooksConsentRequest`
- * message and the webview's ConsentBubble (the greeter character's speech
- * bubble) renders them verbatim, so there is exactly one copy of the terms and
- * no client-side duplicate to drift into asking for approval on weaker terms.
+ * message and the webview's IntroBubble (the greeter character's speech
+ * bubble) renders them verbatim on the Intro's consent step, so there is
+ * exactly one copy of the terms and no client-side duplicate to drift into
+ * asking for approval on weaker terms.
  *
- * Two pieces: the HEADLINE is the greeter's welcome and the DISCLOSURE is the
- * bubble's body. The headline carries NO disclosure facts — every fact lives
- * in the shared disclosure block, so no fact depends on how a surface renders
- * its title slot (consentCopy.test.ts pins that split).
+ * Two pieces: the HEADLINE is the title of the Intro's consent step and the
+ * DISCLOSURE is that step's body. The headline carries NO disclosure facts —
+ * every fact lives in the shared disclosure block, so no fact depends on how a
+ * surface renders its title slot (consentCopy.test.ts pins that split).
  *
  * The event count is interpolated from CLAUDE_HOOK_EVENTS, never written out:
  * a hardcoded number silently becomes a lie the next time the list changes.
@@ -20,7 +21,7 @@ const SETTINGS_FILE = '~/.claude/settings.json';
 
 /** WHY we ask + WHAT we write. */
 export const CONSENT_FACT_WHAT =
-  `To show your agents in this office in real time, Pixel Agents adds hooks for ` +
+  `To bring your agents to life in real time, Pixel Agents adds hooks for ` +
   `${CLAUDE_HOOK_EVENTS.length} Claude Code events to ${SETTINGS_FILE}. ` +
   `Your existing settings are kept, with a one-time backup saved as settings.json${SETTINGS_BACKUP_SUFFIX}.`;
 
@@ -44,13 +45,15 @@ export const CONSENT_FACT_REVERSIBLE =
 /** Headline for the first-run gate — the only population that is asked. A user
  *  whose hooks a pre-consent version already installed is migrated silently
  *  (the migration only ever drops events), so there is no second headline.
- *  Pure greeting by design: the facts all live in CONSENT_DISCLOSURE. */
-export const CONSENT_INSTALL_HEADLINE = 'Welcome to Pixel Agents!';
+ *  Title of the Intro's consent step ("Welcome to Pixel Agents!" is the
+ *  Intro's own opening-step title, owned by the webview). Carries NO
+ *  disclosure facts by design: the facts all live in CONSENT_DISCLOSURE. */
+export const CONSENT_INSTALL_HEADLINE = 'One more thing: hooks!';
 
 /** The three disclosure facts, in order, as one block.
  *
- *  This is the bubble's body. The ConsentBubble splits it on the blank lines
- *  and renders every paragraph in full on the decision surface itself — no
+ *  This is the consent step's body. The IntroBubble splits it on the blank
+ *  lines and renders every paragraph in full on the decision surface itself — no
  *  "Details" affordance, which would put the disclosure one click away from
  *  the decision it is there to inform. */
 export const CONSENT_DISCLOSURE = [

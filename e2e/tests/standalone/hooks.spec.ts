@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { expect, test } from '../../fixtures/standalone';
 import { sendHookEvent, sessionEndExit, sessionStartStartup } from '../../helpers/hooks';
+import { advanceIntroToConsentStep, finishIntro } from '../../helpers/intro';
 import { expectOverlayCount, expectOverlayVisible } from '../../helpers/office';
 import type { RecordedServerMessage } from '../../helpers/standalone';
 import { openSettingsModal, setSettings } from '../../helpers/webview';
@@ -139,13 +140,15 @@ test.describe('Standalone / hooks consent', () => {
   }
 
   // The operator's route: the printed tokened URL loads a privileged session,
-  // the dialog rides the handshake, and Install writes the hooks.
-  test('the tokened page shows the consent dialog and Install writes the hooks @area:standalone', async ({
+  // the Intro rides the handshake, and Install (on its consent step) writes
+  // the hooks.
+  test('the tokened page shows the Intro and Install writes the hooks @area:standalone', async ({
     page,
     standalone,
   }) => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await advanceIntroToConsentStep(dialog);
     // The disclosure travels with the request — the browser renders the
     // server's exact terms.
     await expect(dialog).toContainText('~/.claude/settings.json');
@@ -154,10 +157,12 @@ test.describe('Standalone / hooks consent', () => {
     expect(fs.existsSync(path.join(standalone.tmpHome, '.claude', 'settings.json'))).toBe(false);
 
     await dialog.getByRole('button', { name: 'Install Hooks' }).click();
-    await expect(dialog).toBeHidden({ timeout: 15_000 });
 
     await expect.poll(() => readConsentFrom(standalone.tmpHome), { timeout: 15_000 }).toBe(true);
     await expect.poll(() => ourHookEventCount(standalone.tmpHome), { timeout: 15_000 }).toBe(12);
+
+    // The install's own hooksStatus broadcast must not yank the closing step.
+    await finishIntro(dialog);
   });
 
   // The token boundary, at the browser level: a bare-URL session still watches
@@ -199,11 +204,13 @@ test.describe('Standalone / hooks consent', () => {
   }) => {
     const settingsPath = path.join(standalone.tmpHome, '.claude', 'settings.json');
 
-    // First-run dialog is up; decline with Not Now — which writes NOTHING.
+    // First-run Intro is up; decline with Not Now — which writes NOTHING —
+    // and finish the tour.
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await advanceIntroToConsentStep(dialog);
     await dialog.getByRole('button', { name: 'Not Now' }).click();
-    await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await finishIntro(dialog);
     await page.waitForTimeout(1_000);
 
     // Nothing installed, no consent — but the preference defaults true.
