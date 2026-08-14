@@ -94,7 +94,21 @@ with upstream since it does not exist there):
   - `installHooks` / `uninstallHooks` → no-ops; `areHooksInstalled` → `true`. There is nothing to
     install into: the HTTP call *is* the hook.
   - `formatToolStatus`, `permissionExemptTools`, `subagentToolNames`, `readingTools` — small
-    static config over a caller-defined tool vocabulary.
+    static config over a caller-defined tool vocabulary. **Resolved: free-form tool names, not a
+    fixed vocabulary**, because unlike Claude's closed set of built-in tools, any external
+    script/tool can be the caller here and can't be enumerated up front. Keep
+    `readingTools`/`subagentToolNames`/`permissionExemptTools` as empty-set defaults/backstop
+    (matching the `HookProvider` interface shape in `core/src/provider.ts:88-97`), but add
+    **optional per-event hints** so a caller can self-classify at the point of use:
+    `toolStart`/`subagentStart` gain optional `isReadingTool?: boolean`, `isSubagentTool?: boolean`,
+    and `statusText?: string` fields on `AgentEvent` (`core/src/provider.ts`). `web.ts`'s
+    `formatToolStatus` prefers `statusText` when present, else falls back to `Using ${toolName}` —
+    no switch needed. The webview's `isReadingToolName`/`isSubagentToolName`
+    (`webview-ui/src/office/toolUtils.ts:55-61`) need to consult the per-event hint carried on the
+    `agentToolStart`/`subagentToolStart` broadcast before falling back to the static
+    `providerCapabilities` snapshot (`clientMessageHandler.ts:229-230`, sent once at
+    `webviewReady` today). This is additive to the AsyncAPI contract (new optional fields on
+    existing message variants) rather than a new message type.
   - Deliberately **omits** every optional member: no `getSessionDirs`, `getAllSessionRoots`,
     `sessionFilePattern`, `parseTranscriptLine`, `buildLaunchCommand`, `terminalNamePrefix`,
     no `team`.
@@ -159,11 +173,35 @@ No new lifecycle code — reuse what exists:
   exists to drop transient no-activity sessions and suits a REST caller fine. `transcriptPath` is
   already explicitly optional ("undefined for providers without transcripts").
   → Correct curl sequencing (`sessionStart` then activity) is all that is required.
+  **Resolved: keep the pending/confirm pattern, no immediate materialization on `sessionStart`
+  alone.** `sessionRouter.ts`'s pending map has no TTL/expiry (`storePending`/`confirmPending`/
+  `discardPending`, a plain `Map` cleared only on `dispose()` or a matching `sessionEnd`), so an
+  abandoned `sessionStart`-only REST call costs nothing more than a small in-memory entry —
+  contrast with immediate materialization, which would render a visible ghost/headless character
+  for every stray or duplicate `sessionStart`, with no natural "process exited" signal to clean it
+  up automatically (unlike Claude, where even an accidental session still fires `SessionEnd`).
+  `e2e/tests/standalone/hooks.spec.ts:20-33` already locks this contract in for Claude (`sessionStart`
+  → `expectOverlayCount(page, 0)`, confirmed only after the next activity event) and Phase 8 below
+  reuses that exact assertion shape for the web provider. This is provider-agnostic logic already
+  keyed only on `HookEvent`/`AgentEvent`, so it needs no change to support the web provider — just
+  correct curl/script sequencing.
 - **Tracking gate.** `isTrackedSession()` (`hookEventHandler.ts:92-100`) resolves a project dir
   from `transcriptPath ?? cwd` and requires it to match a known agent's `projectDir`, unless
-  *Watch All Sessions* is on. **Decision needed:** a deliberate authenticated POST is inherently
-  intentional, unlike an ambient background session, so the web provider should probably bypass
-  this gate. Must be provider-scoped so Claude's behaviour is untouched.
+  *Watch All Sessions* is on. **Resolved: no bypass needed, because there's nothing to bypass.**
+  `isTrackedSession()`'s return value is dead for control flow in `hookEventHandler.ts` — its
+  three call sites are all `if (debug && tracked) console.log(...)` (lines 176, 238, 248);
+  `storePending()` and every other branch execute unconditionally regardless of `tracked`. The
+  real admission gate for ambient/external sessions lives in `agentRuntime.ts:195`
+  (`if (!isTrackedProjectDir(projectDir) && !this.watchAllSessions.current) return;`, inside
+  `onExternalSessionDetected`) — provider-agnostic today, fed only by `projectDir`/
+  `watchAllSessions`. Leave both untouched for launch: a valid bearer token authenticates the
+  *caller*, not the *workspace*, so bypassing `agentRuntime.ts:195` would let an authenticated POST
+  with an arbitrary `cwd` adopt sessions for projects never opened in this instance — a strictly
+  larger capability than Claude's hook path grants, and worse UX for a REST caller (no natural
+  `SessionEnd` follow-through the way an exiting CLI process gives you, so a stray/typo'd `cwd`
+  leaves a zombie pending session). If cross-workspace REST adoption is wanted later, it should be
+  an explicit, provider-scoped opt-in at `agentRuntime.ts:195` (e.g. a `provider.trustedOrigin`
+  flag), not a change to `isTrackedSession()`.
 - **Headless / ghost.** `isHeadless` already means exactly this case — "adopted from outside,
   so there is no terminal to focus" (`webview-ui/src/office/types.ts:226-229`), derived from
   `isExternal` in `useExtensionMessages.ts:32`, rendered translucent at
@@ -224,25 +262,28 @@ This is arguably *more* comfortable than onboarding the Claude provider: Claude'
 writes into `~/.claude/settings.json` and needs a real CLI session; the web provider's
 `installHooks`/`areHooksInstalled` are no-ops (Phase 2), so there is nothing to install or verify.
 
-**Two comfort/security gaps identified, deliberately left as decisions rather than defaults:**
+**Two comfort/security gaps identified, one resolved, one deferred:**
 
 1. **Token discovery is manual every time.** Reading `server.json` by hand before every curl
    session is fine scripted, mildly annoying live. Candidate improvement: a
    `pixel-agents --print-web-endpoint` flag emitting an exportable
    `PIXEL_AGENTS_URL`/`PIXEL_AGENTS_TOKEN` pair. Small, additive, no conflict risk — deferred to
    a follow-up rather than blocking this plan.
-2. **No opt-out exists.** The plan currently makes `web` always-on with no disable switch. This
-   is a lower-footprint attack surface than Claude's (no real hook install, no real CLI session
-   required — just the existing bearer token), which is worth deciding deliberately rather than
-   silently shipping:
-   - **Option A (default in this plan): always-on.** Simplest, matches the "just works" goal
-     above. The bearer token already gates the entire hook endpoint for every provider, so this
-     is not a new trust boundary, only a new use of an existing one.
-   - **Option B: add a settings toggle** (`webProviderEnabled`, alongside `hooksEnabled` /
-     `watchAllSessions` in `configPersistence.ts`'s `AdapterSettings`) so security-conscious users
-     can disable it. Small, additive change if wanted later.
-
-   Leaning **Option A** for this plan; flagged here rather than decided silently.
+2. **No opt-out exists — resolved as Option A (always-on).** `POST /api/hooks/:providerId` is
+   registered unconditionally at server boot (`httpServer.ts:107-135`) with only bearer-token auth
+   as `preHandler` — there is no reference to `hooksEnabled`/`watchAllSessions` anywhere in
+   `httpServer.ts` (confirmed by grep), matching the documented key decision that the server always
+   starts and only *hook installation* is gated by settings. A web provider has no installer
+   side-effect to gate in the first place (unlike Claude's `~/.claude/settings.json` write), so
+   there's no natural "off" state to map a toggle onto. A `webProviderEnabled` setting (Option B)
+   was scoped and rejected for launch: it would touch 7+ files end-to-end (AsyncAPI schema +
+   generated `messages.ts` with a mandatory CI drift check, `configPersistence.ts`'s
+   `AdapterSettings`/key list/defaults/parser, `clientMessageHandler.ts`, both VS Code and
+   standalone wiring, `SettingsModal.tsx`/`App.tsx`) for roughly half a day to a day of work,
+   disproportionate to gating a boolean with no corresponding installer to disable. The bearer
+   token already gates the entire hook endpoint for every provider uniformly — this is not a new
+   trust boundary, only a new use of an existing one. Revisit only if a concrete abuse case
+   specific to the web provider emerges; the pattern to replicate then is `hooksEnabled` end to end.
 
 ### Phase 8 — End-to-end: curl on one side, Playwright watching on the other
 
@@ -308,13 +349,39 @@ curl, because curl is the real client for this provider.
 
 ---
 
-## 5. Open questions
+## 5. Open questions — resolved
 
-1. Should the web provider bypass `isTrackedSession()` (Phase 3)? Leaning yes, provider-scoped.
-2. Fixed tool vocabulary, or free-form tool names with a `readingTools` hint in the payload?
-3. Should `sessionStart` be allowed to create an agent immediately, or keep the
-   confirming-event requirement for consistency with Claude? Leaning keep, for consistency.
-4. Auth: reuse the existing bearer token as-is (simplest, consistent), or is a separate
-   scope/token warranted for an externally-driven provider?
-5. Should the web provider be always-on (Phase 7, Option A) or gated by a new
-   `webProviderEnabled` setting (Option B)? Leaning Option A for launch simplicity.
+1. **Should the web provider bypass `isTrackedSession()` (Phase 3)?** No — resolved as **not
+   applicable**. `isTrackedSession()`'s return value is dead for control flow (its call sites are
+   debug-log-only); the actual admission gate is `agentRuntime.ts:195`
+   (`isTrackedProjectDir`/`watchAllSessions`), which is already provider-agnostic and stays
+   untouched. See Phase 3 above for the full reasoning and the risk a bypass there would introduce
+   (cross-workspace adoption from an authenticated-but-arbitrary `cwd`).
+2. **Fixed tool vocabulary, or free-form tool names with a `readingTools` hint in the payload?**
+   **Free-form**, with optional per-event `isReadingTool`/`isSubagentTool`/`statusText` hints on
+   `toolStart`/`subagentStart`. A REST provider can't enumerate a caller-defined vocabulary up
+   front the way Claude's fixed built-in tool set allows. See Phase 2 above for the field-level
+   detail.
+3. **Should `sessionStart` create an agent immediately, or keep the confirming-event requirement?**
+   **Keep the confirming-event requirement.** The pending map has no TTL and costs nothing on
+   abandonment; immediate materialization would render a ghost character for every stray/duplicate
+   `sessionStart` with no automatic cleanup signal. See Phase 3 above.
+4. **Auth: reuse the existing bearer token, or a separate scope/token?** **Reuse the existing
+   token.** `providerId` never participates in auth today (`bearerAuth` closes over one token for
+   the whole `/api/hooks/:providerId` route); there is no prior art for per-provider tokens (VS
+   Code and standalone already share one token per server process), and a separate token would add
+   a second secret to manage without shrinking the existing trust boundary (same route, same
+   middleware) — it only becomes worthwhile if auth becomes provider-aware, which nothing here
+   requires. A separate token is estimated as medium-cost (provider-aware `bearerAuth`, a second
+   persisted secret, script/doc updates) should it ever be wanted for defense-in-depth.
+5. **Always-on (Option A), or gated by a new `webProviderEnabled` setting (Option B)?**
+   **Option A, always-on.** The hook route is already unconditional at boot regardless of
+   `hooksEnabled`/`watchAllSessions`, matching the "server always starts" key decision; the web
+   provider has no installer side-effect to gate, so a toggle has no natural "off" behavior to map
+   onto and would cost roughly half a day to a day across 7+ files (AsyncAPI + generated bindings,
+   `configPersistence.ts`, `clientMessageHandler.ts`, both adapters, webview settings UI) for that
+   marginal benefit. See Phase 7 above.
+
+All five questions were resolved by direct code inspection (see the corresponding phase sections
+for file:line evidence) rather than left as leanings — no further design decisions are blocking
+before implementation starts.
