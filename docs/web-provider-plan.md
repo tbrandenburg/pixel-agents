@@ -151,9 +151,51 @@ animation. Prefer the union — it needs no protocol change.
 - **Unit** `server/__tests__/web.test.ts` — `normalizeHookEvent` per event kind plus malformed
   input, mirroring `claude.test.ts`.
 - **Unit** registry routing — the Phase 1 regression guard: two provider ids, two providers.
-- **E2E** (optional) a standalone spec driving a character entirely over HTTP. Read
-  `e2e/README.md` → *"Mocking model & rules"* first; the standalone server is the single
-  documented exception to the process-boundary rule, which is what makes this legal.
+- **E2E** — see Phase 7 below: a standalone spec driving a character entirely over HTTP
+  (curl-equivalent `sendHookEvent` calls) while Playwright observes spawn/move/despawn in a real
+  browser. No longer optional — this is the plan's primary proof that the provider works.
+
+### Phase 7 — End-to-end: curl on one side, Playwright watching on the other
+
+The point of this provider is that a human (or script) can drive it with `curl` while a real
+browser renders the result — so the e2e test should prove exactly that, not simulate it through
+internals.
+
+This is the standalone exception already carved out in `e2e/README.md` → *"Mocking model &
+rules"*: `standalone/hooks.spec.ts` has no VS Code terminal to host a mocked CLI, so it POSTs to
+the server's hook endpoint directly via the `sendHookEvent` helper — that is the one sanctioned
+place a test talks to the hook endpoint directly instead of going through the `claudeScenario`
+builder. The web-provider test fits this exact shape, one level more literally: the "mock" *is*
+curl, because curl is the real client for this provider.
+
+- **New file** `e2e/tests/standalone/web-provider.spec.ts`, reusing the `standalone` fixture
+  (spawns the real Fastify server + a real browser page against it — no VS Code).
+- **Driving side**: use `sendHookEvent(standalone.hookServerConfig, {...})`
+  (`e2e/helpers/hooks.ts`) exactly as `standalone/hooks.spec.ts` does, but targeted at
+  `POST /api/hooks/web` instead of `/api/hooks/claude`, with the web provider's own payload shape
+  from Phase 2. This is literally the same HTTP call `curl` would make — the test is not
+  special-cased, it's the same helper wrapping the same request a human curl invocation performs.
+  A companion snippet in the plan/docs will show the equivalent raw `curl` for manual reproduction.
+- **Observing side**: assert only on Playwright-visible outcomes, per the project's e2e rules —
+  no reaching into server/store internals:
+  1. `sessionStart` (with `cwd`) → **no** overlay yet (`expectOverlayCount(page, 0)`), proving the
+     pending-session behaviour from Phase 3 also holds for this provider — mirrors the existing
+     negative-assertion wait pattern in `standalone/hooks.spec.ts`.
+  2. `toolStart` (confirming event) → the agent **spawns**: overlay appears
+     (`expectOverlayVisible`), matrix spawn effect settles, character is rendered `isHeadless`
+     (ghost) once *Display Headless as Ghosts* is enabled via `setSettings`.
+  3. A second `toolStart`/`toolEnd` pair with a different `tool_name` → the character **moves**
+     between wander/active states and the tool overlay label updates — asserted via the office
+     helpers (`e2e/helpers/office.ts`), not raw canvas pixel inspection.
+  4. `sessionEnd` → despawn (matrix effect), overlay gone.
+- **Regression coverage this buys**: proves Phase 1 routing end-to-end (a *different* provider id
+  reaches a *different* code path and still renders correctly), proves Phase 3's headless/pending
+  behaviour without any Claude-specific transcript involved, and proves Phase 4's tool-metadata
+  union (the web provider's own tool vocabulary must still pick correct reading/typing animation).
+- **Inventory**: tag `@area:standalone` (existing area) or add a new `@area:web-provider` tag if
+  the suite grows past one spec — decide at implementation time. Either way, run
+  `npm run e2e:inventory` and commit the regenerated `e2e/README.md` section, since CI fails on
+  any drift there.
 
 ---
 
