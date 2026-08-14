@@ -18,13 +18,13 @@ Two things fall out of a REST-driven provider:
    framework can render itself as a character by POSTing lifecycle events. No hook installation,
    no transcript format to reverse-engineer.
 2. **The provider abstraction gets validated.** `core/src/provider.ts` says provider-type taxonomy
-   work is deferred until *"a real second provider ... actually lands, derived from that provider's
-   needs rather than speculation."* This is that provider, and it exercises the abstraction at its
+   work is deferred until _"a real second provider ... actually lands, derived from that provider's
+   needs rather than speculation."_ This is that provider, and it exercises the abstraction at its
    thinnest: no file fallback, no team, no terminal.
 
 Non-goal: replacing or degrading the Claude provider. Both must work simultaneously.
 
-Non-goal: a general REST *control/query* API. This plan only covers the ingestion direction
+Non-goal: a general REST _control/query_ API. This plan only covers the ingestion direction
 (events → runtime), matching what `POST /api/hooks/:providerId` already is. Listing agents,
 launching/closing/focusing an agent, or reading current state remain WebSocket
 `ClientMessage`/`ServerMessage` concerns and are untouched by this plan.
@@ -36,17 +36,17 @@ launching/closing/focusing an agent, or reading current state remain WebSocket
 Before any provider work, this has to be resolved. The current runtime is **single-provider**,
 despite the URL shape and docs implying otherwise:
 
-| Location | Current state |
-| --- | --- |
-| `server/src/httpServer.ts:112` | Route `POST /api/hooks/:providerId` — `providerId` captured and validated (`^[a-z0-9-]+$`) |
-| `server/src/agentRuntime.ts:291` | `handleHookEvent(providerId, event)` — forwards it |
-| `server/src/hookEventHandler.ts:132` | `handleEvent(_providerId, event)` — **underscore-prefixed, never read** |
-| `server/src/cli.ts:118` | `new AgentRuntime(store, claudeProvider)` — provider hard-coded |
-| `adapters/vscode/PixelAgentsViewProvider.ts:167` | `new AgentRuntime(this.store, claudeProvider)` — provider hard-coded |
-| `server/src/providers/index.ts` | Plain re-export file; nothing consumes it as a lookup table |
-| `server/src/clientMessageHandler.ts:229-230` | Reads `claudeProvider.readingTools` / `.subagentToolNames` directly |
+| Location                                         | Current state                                                                              |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `server/src/httpServer.ts:112`                   | Route `POST /api/hooks/:providerId` — `providerId` captured and validated (`^[a-z0-9-]+$`) |
+| `server/src/agentRuntime.ts:291`                 | `handleHookEvent(providerId, event)` — forwards it                                         |
+| `server/src/hookEventHandler.ts:132`             | `handleEvent(_providerId, event)` — **underscore-prefixed, never read**                    |
+| `server/src/cli.ts:118`                          | `new AgentRuntime(store, claudeProvider)` — provider hard-coded                            |
+| `adapters/vscode/PixelAgentsViewProvider.ts:167` | `new AgentRuntime(this.store, claudeProvider)` — provider hard-coded                       |
+| `server/src/providers/index.ts`                  | Plain re-export file; nothing consumes it as a lookup table                                |
+| `server/src/clientMessageHandler.ts:229-230`     | Reads `claudeProvider.readingTools` / `.subagentToolNames` directly                        |
 
-Consequence: `POST /api/hooks/web` and `POST /api/hooks/claude` today route to the *same*
+Consequence: `POST /api/hooks/web` and `POST /api/hooks/claude` today route to the _same_
 provider instance. Adding a provider directory plus an export line is **not** sufficient.
 
 Encouraging counter-signal: `SessionRouter` already stores `providerId` on buffered events
@@ -78,7 +78,7 @@ Two details in `HookEventHandler` that assume a singleton and must move:
 - `getSubagentToolSet()` (`hookEventHandler.ts:82-90`) derives from `this.provider.team` /
   `this.provider.subagentToolNames` — must take the resolved provider as input.
 
-Acceptance: a test proves `/api/hooks/claude` and `/api/hooks/web` reach *different* providers.
+Acceptance: a test proves `/api/hooks/claude` and `/api/hooks/web` reach _different_ providers.
 All 13 existing server suites stay green with no behavioural change for Claude.
 
 ### Phase 2 — The web provider
@@ -92,23 +92,34 @@ with upstream since it does not exist there):
     designed to be near 1:1 with the `AgentEvent` union so normalization stays trivial and the
     API is self-describing.
   - `installHooks` / `uninstallHooks` → no-ops; `areHooksInstalled` → `true`. There is nothing to
-    install into: the HTTP call *is* the hook.
+    install into: the HTTP call _is_ the hook.
   - `formatToolStatus`, `permissionExemptTools`, `subagentToolNames`, `readingTools` — small
     static config over a caller-defined tool vocabulary. **Resolved: free-form tool names, not a
     fixed vocabulary**, because unlike Claude's closed set of built-in tools, any external
-    script/tool can be the caller here and can't be enumerated up front. Keep
+    script/tool can be the caller here and can't be enumerated up front. Ships with
     `readingTools`/`subagentToolNames`/`permissionExemptTools` as empty-set defaults/backstop
-    (matching the `HookProvider` interface shape in `core/src/provider.ts:88-97`), but add
-    **optional per-event hints** so a caller can self-classify at the point of use:
-    `toolStart`/`subagentStart` gain optional `isReadingTool?: boolean`, `isSubagentTool?: boolean`,
-    and `statusText?: string` fields on `AgentEvent` (`core/src/provider.ts`). `web.ts`'s
-    `formatToolStatus` prefers `statusText` when present, else falls back to `Using ${toolName}` —
-    no switch needed. The webview's `isReadingToolName`/`isSubagentToolName`
-    (`webview-ui/src/office/toolUtils.ts:55-61`) need to consult the per-event hint carried on the
-    `agentToolStart`/`subagentToolStart` broadcast before falling back to the static
-    `providerCapabilities` snapshot (`clientMessageHandler.ts:229-230`, sent once at
-    `webviewReady` today). This is additive to the AsyncAPI contract (new optional fields on
-    existing message variants) rather than a new message type.
+    (matching the `HookProvider` interface shape in `core/src/provider.ts:88-97`) — callers wanting
+    the "reading" animation reuse one of Claude's own tool names (e.g. `"Read"`, `"Grep"`), which
+    still classifies correctly since Phase 4 unions capabilities across the registry.
+    **Implemented as a smaller mechanism than first drafted here**: rather than typed
+    `isReadingTool?`/`isSubagentTool?`/`statusText?` fields added to `AgentEvent` itself (which
+    would have meant new optional fields on the `AgentToolStart`/`SubagentToolStart` AsyncAPI
+    schemas, regenerated bindings, and webview wiring to consult a per-event hint ahead of the
+    static `providerCapabilities` snapshot), the actual implementation is scoped to just the
+    caller-supplied _display text_ override: the wire payload's optional `status` field
+    (see Phase 2a's schema) is folded into the normalized event's `input` under an internal
+    `__statusText` key by `web.ts`'s `withStatusOverride()` helper, and `web.ts`'s own
+    `formatToolStatus` prefers it over the `Using ${toolName}` fallback — for `toolStart` only
+    (not yet threaded through `subagentStart`'s status label, which always renders
+    `Subtask: ${toolName}`). No `core/src/provider.ts` or AsyncAPI change was needed for this
+    reduced scope. `isReadingTool`/`isSubagentTool` per-event hints were **not implemented** —
+    classification stays at the provider-vocabulary level (Phase 4's union), not per-event. This
+    is a deliberate KISS/YAGNI scoping decision made during implementation, not an oversight left
+    unaddressed: the common case (reuse a known tool name, or accept the default typing animation)
+    is covered without adding wire-protocol surface for a per-event override that no caller in the
+    e2e coverage or manual-testing docs actually needs yet. Revisit if a real caller needs
+    per-event reading/sub-agent classification for a tool name that isn't in any registered
+    provider's vocabulary.
   - Deliberately **omits** every optional member: no `getSessionDirs`, `getAllSessionRoots`,
     `sessionFilePattern`, `parseTranscriptLine`, `buildLaunchCommand`, `terminalNamePrefix`,
     no `team`.
@@ -125,21 +136,21 @@ be inferred from one partial example.
 (`progress` is never hook-driven — it only exists in the JSONL/file-fallback path, which this
 provider has none of). Coverage for the web provider:
 
-| `AgentEvent.kind` | In scope? | Web event name | Notes |
-| --- | --- | --- | --- |
-| `sessionStart` | Yes | `sessionStart` | Requires `cwd`; drives Phase 3 pending-session creation |
-| `sessionEnd` | Yes | `sessionEnd` | Optional `reason` |
-| `toolStart` | Yes | `toolStart` | `toolId`, `toolName`, optional `input`, `status` override |
-| `toolEnd` | Yes | `toolEnd` | `toolId` |
-| `turnEnd` | Yes | `turnEnd` | Optional `awaitingInput` (maps to Claude's idle vs. done distinction) |
-| `permissionRequest` | Yes | `permissionRequest` | No extra fields required |
-| `subagentStart` | Yes | `subagentStart` | `parentToolId`, `toolId`, `toolName`; enables the plain (non-team) sub-agent character, same as Claude's `Task`/`Agent` tools |
-| `subagentEnd` | Yes | `subagentEnd` | `parentToolId`, `toolId` |
-| `subagentTurnEnd` | **No** | — | Tied to Agent Teams (`TeammateIdle`/`TaskCompleted`); Phase 2 omits `team` entirely, so this kind has no web-provider equivalent |
-| `progress` | **No** | — | Not hook-driven for any provider; JSONL/file-fallback only, which this provider intentionally has none of |
+| `AgentEvent.kind`   | In scope? | Web event name      | Notes                                                                                                                            |
+| ------------------- | --------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionStart`      | Yes       | `sessionStart`      | Requires `cwd`; drives Phase 3 pending-session creation                                                                          |
+| `sessionEnd`        | Yes       | `sessionEnd`        | Optional `reason`                                                                                                                |
+| `toolStart`         | Yes       | `toolStart`         | `toolId`, `toolName`, optional `input`, `status` override                                                                        |
+| `toolEnd`           | Yes       | `toolEnd`           | `toolId`                                                                                                                         |
+| `turnEnd`           | Yes       | `turnEnd`           | Optional `awaitingInput` (maps to Claude's idle vs. done distinction)                                                            |
+| `permissionRequest` | Yes       | `permissionRequest` | No extra fields required                                                                                                         |
+| `subagentStart`     | Yes       | `subagentStart`     | `parentToolId`, `toolId`, `toolName`; enables the plain (non-team) sub-agent character, same as Claude's `Task`/`Agent` tools    |
+| `subagentEnd`       | Yes       | `subagentEnd`       | `parentToolId`, `toolId`                                                                                                         |
+| `subagentTurnEnd`   | **No**    | —                   | Tied to Agent Teams (`TeammateIdle`/`TaskCompleted`); Phase 2 omits `team` entirely, so this kind has no web-provider equivalent |
+| `progress`          | **No**    | —                   | Not hook-driven for any provider; JSONL/file-fallback only, which this provider intentionally has none of                        |
 
 So the provider is complete for **every kind reachable via hooks in a non-team CLI** — the same
-subset Claude itself would produce with Agent Teams turned off. It is *not* a complete stand-in
+subset Claude itself would produce with Agent Teams turned off. It is _not_ a complete stand-in
 for team/transcript features, by design (see Phase 2's explicit list of omitted optional
 `HookProvider` members).
 
@@ -167,7 +178,7 @@ POST /api/hooks/web
 No new lifecycle code — reuse what exists:
 
 - **Creation.** `hookEventHandler.ts` already handles unknown sessions: `sessionStart` carrying
-  `transcriptPath` *or* `cwd` calls `sessionRouter.storePending(...)`, and the agent is only
+  `transcriptPath` _or_ `cwd` calls `sessionRouter.storePending(...)`, and the agent is only
   materialised once a confirming event (`turnEnd` / `permissionRequest`) arrives. That filter
 
   exists to drop transient no-activity sessions and suits a REST caller fine. `transcriptPath` is
@@ -185,9 +196,10 @@ No new lifecycle code — reuse what exists:
   reuses that exact assertion shape for the web provider. This is provider-agnostic logic already
   keyed only on `HookEvent`/`AgentEvent`, so it needs no change to support the web provider — just
   correct curl/script sequencing.
+
 - **Tracking gate.** `isTrackedSession()` (`hookEventHandler.ts:92-100`) resolves a project dir
   from `transcriptPath ?? cwd` and requires it to match a known agent's `projectDir`, unless
-  *Watch All Sessions* is on. **Resolved: no bypass needed, because there's nothing to bypass.**
+  _Watch All Sessions_ is on. **Resolved: no bypass needed, because there's nothing to bypass.**
   `isTrackedSession()`'s return value is dead for control flow in `hookEventHandler.ts` — its
   three call sites are all `if (debug && tracked) console.log(...)` (lines 176, 238, 248);
   `storePending()` and every other branch execute unconditionally regardless of `tracked`. The
@@ -195,7 +207,7 @@ No new lifecycle code — reuse what exists:
   (`if (!isTrackedProjectDir(projectDir) && !this.watchAllSessions.current) return;`, inside
   `onExternalSessionDetected`) — provider-agnostic today, fed only by `projectDir`/
   `watchAllSessions`. Leave both untouched for launch: a valid bearer token authenticates the
-  *caller*, not the *workspace*, so bypassing `agentRuntime.ts:195` would let an authenticated POST
+  _caller_, not the _workspace_, so bypassing `agentRuntime.ts:195` would let an authenticated POST
   with an arbitrary `cwd` adopt sessions for projects never opened in this instance — a strictly
   larger capability than Claude's hook path grants, and worse UX for a REST caller (no natural
   `SessionEnd` follow-through the way an exiting CLI process gives you, so a stray/typo'd `cwd`
@@ -205,7 +217,7 @@ No new lifecycle code — reuse what exists:
 - **Headless / ghost.** `isHeadless` already means exactly this case — "adopted from outside,
   so there is no terminal to focus" (`webview-ui/src/office/types.ts:226-229`), derived from
   `isExternal` in `useExtensionMessages.ts:32`, rendered translucent at
-  `renderer.ts:405-407` behind the *Display Headless as Ghosts* setting (shipped in `b1401bd`).
+  `renderer.ts:405-407` behind the _Display Headless as Ghosts_ setting (shipped in `b1401bd`).
   → Verify a web-provider agent lands on that path; broaden minimally only if it does not.
   Also confirm clicking such a character does not attempt to focus a nonexistent terminal.
 
@@ -237,7 +249,7 @@ animation. Prefer the union — it needs no protocol change.
 
 Because Phase 1 turns the runtime into a **registry** rather than a single active provider, there
 is no "select the web provider" step. `claude` and `web` are both always live at
-`/api/hooks/claude` and `/api/hooks/web` simultaneously — configuring *which* provider is active
+`/api/hooks/claude` and `/api/hooks/web` simultaneously — configuring _which_ provider is active
 is not a concept that exists after this change.
 
 **End-to-end startup sequence** (no new CLI flags, no new config keys required for the happy
@@ -258,7 +270,7 @@ cat ~/.pixel-agents/server.json   # { port, pid, authToken }
 ./scripts/web-agent.sh '{"session_id":"demo-1","hook_event_name":"toolStart","tool_id":"t1","tool_name":"Build"}'
 ```
 
-This is arguably *more* comfortable than onboarding the Claude provider: Claude's `installHooks()`
+This is arguably _more_ comfortable than onboarding the Claude provider: Claude's `installHooks()`
 writes into `~/.claude/settings.json` and needs a real CLI session; the web provider's
 `installHooks`/`areHooksInstalled` are no-ops (Phase 2), so there is nothing to install or verify.
 
@@ -273,7 +285,7 @@ writes into `~/.claude/settings.json` and needs a real CLI session; the web prov
    registered unconditionally at server boot (`httpServer.ts:107-135`) with only bearer-token auth
    as `preHandler` — there is no reference to `hooksEnabled`/`watchAllSessions` anywhere in
    `httpServer.ts` (confirmed by grep), matching the documented key decision that the server always
-   starts and only *hook installation* is gated by settings. A web provider has no installer
+   starts and only _hook installation_ is gated by settings. A web provider has no installer
    side-effect to gate in the first place (unlike Claude's `~/.claude/settings.json` write), so
    there's no natural "off" state to map a toggle onto. A `webProviderEnabled` setting (Option B)
    was scoped and rejected for launch: it would touch 7+ files end-to-end (AsyncAPI schema +
@@ -291,11 +303,11 @@ The point of this provider is that a human (or script) can drive it with `curl` 
 browser renders the result — so the e2e test should prove exactly that, not simulate it through
 internals.
 
-This is the standalone exception already carved out in `e2e/README.md` → *"Mocking model &
-rules"*: `standalone/hooks.spec.ts` has no VS Code terminal to host a mocked CLI, so it POSTs to
+This is the standalone exception already carved out in `e2e/README.md` → _"Mocking model &
+rules"_: `standalone/hooks.spec.ts` has no VS Code terminal to host a mocked CLI, so it POSTs to
 the server's hook endpoint directly via the `sendHookEvent` helper — that is the one sanctioned
 place a test talks to the hook endpoint directly instead of going through the `claudeScenario`
-builder. The web-provider test fits this exact shape, one level more literally: the "mock" *is*
+builder. The web-provider test fits this exact shape, one level more literally: the "mock" _is_
 curl, because curl is the real client for this provider.
 
 - **New file** `e2e/tests/standalone/web-provider.spec.ts`, reusing the `standalone` fixture
@@ -313,7 +325,7 @@ curl, because curl is the real client for this provider.
      negative-assertion wait pattern in `standalone/hooks.spec.ts`.
   2. `toolStart` (confirming event) → the agent **spawns**: overlay appears
      (`expectOverlayVisible`), matrix spawn effect settles, character is rendered `isHeadless`
-     (ghost) once *Display Headless as Ghosts* is enabled via `setSettings`.
+     (ghost) once _Display Headless as Ghosts_ is enabled via `setSettings`.
   3. A second `toolStart`/`toolEnd` pair with a different `tool_name` → the character **moves**
      between wander/active states and the tool overlay label updates — asserted via the office
      helpers (`e2e/helpers/office.ts`), not raw canvas pixel inspection.
@@ -321,8 +333,8 @@ curl, because curl is the real client for this provider.
      on completion — covers the two remaining "Yes" rows in the Phase 2a coverage table so the
      e2e run exercises all 8 in-scope kinds, not just the tool/session subset.
   5. `sessionEnd` → despawn (matrix effect), overlay gone.
-- **Regression coverage this buys**: proves Phase 1 routing end-to-end (a *different* provider id
-  reaches a *different* code path and still renders correctly), proves Phase 3's headless/pending
+- **Regression coverage this buys**: proves Phase 1 routing end-to-end (a _different_ provider id
+  reaches a _different_ code path and still renders correctly), proves Phase 3's headless/pending
   behaviour without any Claude-specific transcript involved, and proves Phase 4's tool-metadata
   union (the web provider's own tool vocabulary must still pick correct reading/typing animation).
 - **Inventory**: tag `@area:standalone` (existing area) or add a new `@area:web-provider` tag if
@@ -358,10 +370,13 @@ curl, because curl is the real client for this provider.
    untouched. See Phase 3 above for the full reasoning and the risk a bypass there would introduce
    (cross-workspace adoption from an authenticated-but-arbitrary `cwd`).
 2. **Fixed tool vocabulary, or free-form tool names with a `readingTools` hint in the payload?**
-   **Free-form**, with optional per-event `isReadingTool`/`isSubagentTool`/`statusText` hints on
-   `toolStart`/`subagentStart`. A REST provider can't enumerate a caller-defined vocabulary up
-   front the way Claude's fixed built-in tool set allows. See Phase 2 above for the field-level
-   detail.
+   **Free-form.** A REST provider can't enumerate a caller-defined vocabulary up front the way
+   Claude's fixed built-in tool set allows; classification for reading-vs-typing animation stays
+   at the provider-vocabulary level (Phase 4's union across the registry) rather than a per-event
+   hint. Implemented scope is narrower than first drafted: only a caller-supplied _display text_
+   override (wire payload's `status` field, for `toolStart` only) shipped, not typed
+   `isReadingTool`/`isSubagentTool`/`statusText` fields on `AgentEvent` itself — see Phase 2 above
+   for the full as-built detail and the reasoning for the smaller scope.
 3. **Should `sessionStart` create an agent immediately, or keep the confirming-event requirement?**
    **Keep the confirming-event requirement.** The pending map has no TTL and costs nothing on
    abandonment; immediate materialization would render a ghost character for every stray/duplicate
