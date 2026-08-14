@@ -24,6 +24,11 @@ Two things fall out of a REST-driven provider:
 
 Non-goal: replacing or degrading the Claude provider. Both must work simultaneously.
 
+Non-goal: a general REST *control/query* API. This plan only covers the ingestion direction
+(events → runtime), matching what `POST /api/hooks/:providerId` already is. Listing agents,
+launching/closing/focusing an agent, or reading current state remain WebSocket
+`ClientMessage`/`ServerMessage` concerns and are untouched by this plan.
+
 ---
 
 ## 2. Blocking finding: `providerId` is plumbed but ignored
@@ -95,17 +100,51 @@ with upstream since it does not exist there):
     no `team`.
 - `constants.ts` — event-name vocabulary and defaults.
 
-Proposed wire shape (to be finalised during implementation):
+### Phase 2a — Coverage: one endpoint, every applicable `AgentEvent` kind
+
+`POST /api/hooks/web` is a single route, same as Claude's — `normalizeHookEvent` discriminates on
+an event-name field, exactly like `claude.ts`'s `switch (raw.hook_event_name)`. That pattern
+already scales to every kind; the table below makes the scope explicit instead of leaving it to
+be inferred from one partial example.
+
+`AgentEvent` has 9 kinds. Claude's `normalizeHookEvent` maps its 11 raw hook names onto 8 of them
+(`progress` is never hook-driven — it only exists in the JSONL/file-fallback path, which this
+provider has none of). Coverage for the web provider:
+
+| `AgentEvent.kind` | In scope? | Web event name | Notes |
+| --- | --- | --- | --- |
+| `sessionStart` | Yes | `sessionStart` | Requires `cwd`; drives Phase 3 pending-session creation |
+| `sessionEnd` | Yes | `sessionEnd` | Optional `reason` |
+| `toolStart` | Yes | `toolStart` | `toolId`, `toolName`, optional `input`, `status` override |
+| `toolEnd` | Yes | `toolEnd` | `toolId` |
+| `turnEnd` | Yes | `turnEnd` | Optional `awaitingInput` (maps to Claude's idle vs. done distinction) |
+| `permissionRequest` | Yes | `permissionRequest` | No extra fields required |
+| `subagentStart` | Yes | `subagentStart` | `parentToolId`, `toolId`, `toolName`; enables the plain (non-team) sub-agent character, same as Claude's `Task`/`Agent` tools |
+| `subagentEnd` | Yes | `subagentEnd` | `parentToolId`, `toolId` |
+| `subagentTurnEnd` | **No** | — | Tied to Agent Teams (`TeammateIdle`/`TaskCompleted`); Phase 2 omits `team` entirely, so this kind has no web-provider equivalent |
+| `progress` | **No** | — | Not hook-driven for any provider; JSONL/file-fallback only, which this provider intentionally has none of |
+
+So the provider is complete for **every kind reachable via hooks in a non-team CLI** — the same
+subset Claude itself would produce with Agent Teams turned off. It is *not* a complete stand-in
+for team/transcript features, by design (see Phase 2's explicit list of omitted optional
+`HookProvider` members).
+
+Full wire shape (supersedes the earlier partial example — one schema, `hook_event_name`
+discriminates all 8 in-scope kinds):
 
 ```jsonc
 POST /api/hooks/web
 {
-  "session_id": "demo-1",          // required; the routing key
-  "hook_event_name": "toolStart",  // maps to AgentEvent.kind
-  "cwd": "/path/to/project",       // required on sessionStart (see Phase 3)
-  "tool_id": "t1",                 // toolStart / toolEnd
-  "tool_name": "Build",
-  "status": "Compiling module X"   // optional display override
+  "session_id": "demo-1",            // required; the routing key on every event
+  "hook_event_name": "toolStart",    // one of the 8 rows above marked "Yes"
+  "cwd": "/path/to/project",         // required on sessionStart only
+  "reason": "exit",                  // sessionEnd only, optional
+  "awaiting_input": false,           // turnEnd only, optional
+  "parent_tool_id": "t0",            // subagentStart / subagentEnd only
+  "tool_id": "t1",                   // toolStart / toolEnd / subagentStart / subagentEnd
+  "tool_name": "Build",              // toolStart / subagentStart
+  "input": { "target": "release" },  // toolStart / subagentStart, optional
+  "status": "Compiling module X"     // optional display override, any tool event
 }
 ```
 
@@ -116,6 +155,7 @@ No new lifecycle code — reuse what exists:
 - **Creation.** `hookEventHandler.ts` already handles unknown sessions: `sessionStart` carrying
   `transcriptPath` *or* `cwd` calls `sessionRouter.storePending(...)`, and the agent is only
   materialised once a confirming event (`turnEnd` / `permissionRequest`) arrives. That filter
+
   exists to drop transient no-activity sessions and suits a REST caller fine. `transcriptPath` is
   already explicitly optional ("undefined for providers without transcripts").
   → Correct curl sequencing (`sessionStart` then activity) is all that is required.
@@ -187,7 +227,10 @@ curl, because curl is the real client for this provider.
   3. A second `toolStart`/`toolEnd` pair with a different `tool_name` → the character **moves**
      between wander/active states and the tool overlay label updates — asserted via the office
      helpers (`e2e/helpers/office.ts`), not raw canvas pixel inspection.
-  4. `sessionEnd` → despawn (matrix effect), overlay gone.
+  4. `subagentStart`/`subagentEnd` → a sub-agent character spawns next to the parent and despawns
+     on completion — covers the two remaining "Yes" rows in the Phase 2a coverage table so the
+     e2e run exercises all 8 in-scope kinds, not just the tool/session subset.
+  5. `sessionEnd` → despawn (matrix effect), overlay gone.
 - **Regression coverage this buys**: proves Phase 1 routing end-to-end (a *different* provider id
   reaches a *different* code path and still renders correctly), proves Phase 3's headless/pending
   behaviour without any Claude-specific transcript involved, and proves Phase 4's tool-metadata
