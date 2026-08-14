@@ -191,11 +191,60 @@ animation. Prefer the union — it needs no protocol change.
 - **Unit** `server/__tests__/web.test.ts` — `normalizeHookEvent` per event kind plus malformed
   input, mirroring `claude.test.ts`.
 - **Unit** registry routing — the Phase 1 regression guard: two provider ids, two providers.
-- **E2E** — see Phase 7 below: a standalone spec driving a character entirely over HTTP
+- **E2E** — see Phase 8 below: a standalone spec driving a character entirely over HTTP
   (curl-equivalent `sendHookEvent` calls) while Playwright observes spawn/move/despawn in a real
   browser. No longer optional — this is the plan's primary proof that the provider works.
 
-### Phase 7 — End-to-end: curl on one side, Playwright watching on the other
+### Phase 7 — Enablement & ergonomics: how a user actually turns this on
+
+Because Phase 1 turns the runtime into a **registry** rather than a single active provider, there
+is no "select the web provider" step. `claude` and `web` are both always live at
+`/api/hooks/claude` and `/api/hooks/web` simultaneously — configuring *which* provider is active
+is not a concept that exists after this change.
+
+**End-to-end startup sequence** (no new CLI flags, no new config keys required for the happy
+path):
+
+```bash
+# 1. Start Pixel Agents exactly as today
+npx pixel-agents --port 3100
+# (or open the VS Code panel — the HTTP server always starts regardless of the
+#  hooksEnabled setting, per the existing "Server always starts" key decision,
+#  so /api/hooks/web is reachable the moment the server is up)
+
+# 2. Discover the endpoint + token (same file every provider already relies on)
+cat ~/.pixel-agents/server.json   # { port, pid, authToken }
+
+# 3. Drive an agent
+./scripts/web-agent.sh '{"session_id":"demo-1","hook_event_name":"sessionStart","cwd":"'"$PWD"'"}'
+./scripts/web-agent.sh '{"session_id":"demo-1","hook_event_name":"toolStart","tool_id":"t1","tool_name":"Build"}'
+```
+
+This is arguably *more* comfortable than onboarding the Claude provider: Claude's `installHooks()`
+writes into `~/.claude/settings.json` and needs a real CLI session; the web provider's
+`installHooks`/`areHooksInstalled` are no-ops (Phase 2), so there is nothing to install or verify.
+
+**Two comfort/security gaps identified, deliberately left as decisions rather than defaults:**
+
+1. **Token discovery is manual every time.** Reading `server.json` by hand before every curl
+   session is fine scripted, mildly annoying live. Candidate improvement: a
+   `pixel-agents --print-web-endpoint` flag emitting an exportable
+   `PIXEL_AGENTS_URL`/`PIXEL_AGENTS_TOKEN` pair. Small, additive, no conflict risk — deferred to
+   a follow-up rather than blocking this plan.
+2. **No opt-out exists.** The plan currently makes `web` always-on with no disable switch. This
+   is a lower-footprint attack surface than Claude's (no real hook install, no real CLI session
+   required — just the existing bearer token), which is worth deciding deliberately rather than
+   silently shipping:
+   - **Option A (default in this plan): always-on.** Simplest, matches the "just works" goal
+     above. The bearer token already gates the entire hook endpoint for every provider, so this
+     is not a new trust boundary, only a new use of an existing one.
+   - **Option B: add a settings toggle** (`webProviderEnabled`, alongside `hooksEnabled` /
+     `watchAllSessions` in `configPersistence.ts`'s `AdapterSettings`) so security-conscious users
+     can disable it. Small, additive change if wanted later.
+
+   Leaning **Option A** for this plan; flagged here rather than decided silently.
+
+### Phase 8 — End-to-end: curl on one side, Playwright watching on the other
 
 The point of this provider is that a human (or script) can drive it with `curl` while a real
 browser renders the result — so the e2e test should prove exactly that, not simulate it through
@@ -267,3 +316,5 @@ curl, because curl is the real client for this provider.
    confirming-event requirement for consistency with Claude? Leaning keep, for consistency.
 4. Auth: reuse the existing bearer token as-is (simplest, consistent), or is a separate
    scope/token warranted for an externally-driven provider?
+5. Should the web provider be always-on (Phase 7, Option A) or gated by a new
+   `webProviderEnabled` setting (Option B)? Leaning Option A for launch simplicity.
