@@ -230,7 +230,7 @@ animation. Prefer the union — it needs no protocol change.
 
 ### Phase 5 — Dev ergonomics (pure additions, zero conflict risk)
 
-- `scripts/web-agent.sh` — reads `port` + `authToken` from `~/.pixel-agents/server.json` and wraps
+- `scripts/web-agent.sh` — reads `port` + `token` from `~/.pixel-agents/server.json` and wraps
   the curl call, so no manual token copying.
 - `server/manual-web-events.http` — REST-Client sample mirroring `manual-hook-events.http`,
   walking `sessionStart → toolStart → toolEnd → permissionRequest → turnEnd → sessionEnd`.
@@ -263,7 +263,7 @@ npx pixel-agents --port 3100
 #  so /api/hooks/web is reachable the moment the server is up)
 
 # 2. Discover the endpoint + token (same file every provider already relies on)
-cat ~/.pixel-agents/server.json   # { port, pid, authToken }
+cat ~/.pixel-agents/server.json   # { port, pid, token }
 
 # 3. Drive an agent
 ./scripts/web-agent.sh '{"session_id":"demo-1","hook_event_name":"sessionStart","cwd":"'"$PWD"'"}'

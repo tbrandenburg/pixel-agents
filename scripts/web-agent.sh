@@ -28,15 +28,15 @@ fi
 
 if command -v jq >/dev/null 2>&1; then
   port=$(jq -r '.port' "$server_json")
-  token=$(jq -r '.authToken' "$server_json")
+  token=$(jq -r '.token' "$server_json")
 else
   # Minimal fallback so this script doesn't hard-require jq.
   port=$(grep -o '"port"[[:space:]]*:[[:space:]]*[0-9]*' "$server_json" | grep -o '[0-9]*$')
-  token=$(grep -o '"authToken"[[:space:]]*:[[:space:]]*"[^"]*"' "$server_json" | sed -E 's/.*:\s*"([^"]*)"/\1/')
+  token=$(grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$server_json" | sed -E 's/.*:\s*"([^"]*)"/\1/')
 fi
 
 if [ -z "$port" ] || [ -z "$token" ]; then
-  echo "error: could not read port/authToken from $server_json" >&2
+  echo "error: could not read port/token from $server_json" >&2
   exit 1
 fi
 
