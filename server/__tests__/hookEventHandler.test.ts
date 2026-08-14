@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { HookEventHandler } from '../src/hookEventHandler.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
+import { webProvider } from '../src/providers/hook/web/web.js';
 import { providerRegistry } from '../src/providers/index.js';
 import { SessionRouter } from '../src/sessionRouter.js';
 import type { AgentState } from '../src/types.js';
@@ -859,31 +860,55 @@ describe('HookEventHandler', () => {
     });
   });
 
+  // ── Explicit-id subagentStart/subagentEnd (no-team providers, e.g. web) ────
+  describe('subagentStart/subagentEnd with explicit ids (no team extension)', () => {
+    it('creates and clears a sub-agent character directly via the web provider (no team, no JSONL)', () => {
+      const webHandler = new HookEventHandler(
+        agents,
+        waitingTimers,
+        permissionTimers,
+        { getProvider: () => webProvider },
+        new SessionRouter(),
+      );
+      const agent = createTestAgent({ id: 1 });
+      agents.set(1, agent);
+      webHandler.registerAgent('sess-1', 1);
+
+      webHandler.handleEvent('web', {
+        hook_event_name: 'subagentStart',
+        session_id: 'sess-1',
+        parent_tool_id: 'p1',
+        tool_id: 'sub-1',
+        tool_name: 'Worker',
+      });
+      const startMsg = mockWebview.messages.find((m) => m.type === 'subagentToolStart');
+      expect(startMsg).toBeTruthy();
+      expect(startMsg?.parentToolId).toBe('p1');
+      expect(startMsg?.toolId).toBe('sub-1');
+      expect(agent.activeSubagentToolIds.get('p1')?.has('sub-1')).toBe(true);
+
+      mockWebview.messages.length = 0;
+      webHandler.handleEvent('web', {
+        hook_event_name: 'subagentEnd',
+        session_id: 'sess-1',
+        parent_tool_id: 'p1',
+        tool_id: 'sub-1',
+      });
+      const clearMsg = mockWebview.messages.find((m) => m.type === 'subagentClear');
+      expect(clearMsg).toBeTruthy();
+      expect(clearMsg?.parentToolId).toBe('p1');
+      expect(agent.activeSubagentToolIds.has('p1')).toBe(false);
+    });
+  });
+
   // ── Multi-provider registry routing (Phase 1 regression guard) ─────────────
   describe('provider registry routing', () => {
-    it('resolves distinct providerIds to different provider instances and dispatches accordingly', () => {
-      // A minimal second provider with its own (deliberately different) event-name
-      // vocabulary -- proves per-event resolution reaches genuinely different
-      // normalization code, not just the same provider twice. Standing in for a
-      // real second provider (e.g. the planned web/REST provider) until one lands.
-      const fakeProvider = {
-        ...claudeProvider,
-        id: 'fake',
-        normalizeHookEvent: (raw: Record<string, unknown>) => {
-          if (raw.hook_event_name === 'permissionRequest' && typeof raw.session_id === 'string') {
-            return { sessionId: raw.session_id, event: { kind: 'permissionRequest' as const } };
-          }
-          return null;
-        },
-      };
-      const registry = {
-        getProvider: (id: string) => (id === 'fake' ? fakeProvider : claudeProvider),
-      };
+    it('resolves "claude" and "web" providerIds to different providers and dispatches accordingly', () => {
       const registryHandler = new HookEventHandler(
         agents,
         waitingTimers,
         permissionTimers,
-        registry,
+        providerRegistry,
         new SessionRouter(),
       );
       const agent = createTestAgent({ id: 1 });
@@ -897,26 +922,26 @@ describe('HookEventHandler', () => {
       expect(mockWebview.messages.find((m) => m.type === 'agentToolPermission')).toBeTruthy();
       mockWebview.messages.length = 0;
 
-      const fakeAgent = createTestAgent({ id: 2 });
-      agents.set(2, fakeAgent);
-      registryHandler.registerAgent('sess-fake', 2);
+      const webAgent = createTestAgent({ id: 2 });
+      agents.set(2, webAgent);
+      registryHandler.registerAgent('sess-web', 2);
 
-      registryHandler.handleEvent('fake', {
+      registryHandler.handleEvent('web', {
         hook_event_name: 'permissionRequest',
-        session_id: 'sess-fake',
+        session_id: 'sess-web',
       });
-      const fakeMsg = mockWebview.messages.find((m) => m.type === 'agentToolPermission');
-      expect(fakeMsg).toBeTruthy();
-      expect(fakeMsg?.id).toBe(2);
+      const webMsg = mockWebview.messages.find((m) => m.type === 'agentToolPermission');
+      expect(webMsg).toBeTruthy();
+      expect(webMsg?.id).toBe(2);
 
-      // Claude's own event name ("PermissionRequest") is meaningless to the fake
+      // Claude's own event name ("PermissionRequest") is meaningless to the web
       // provider's normalizeHookEvent (case-sensitive, different vocabulary) --
       // proving the two providerIds really reach different normalization code,
       // not just the same one twice.
       mockWebview.messages.length = 0;
-      registryHandler.handleEvent('fake', {
+      registryHandler.handleEvent('web', {
         hook_event_name: 'PermissionRequest',
-        session_id: 'sess-fake',
+        session_id: 'sess-web',
       });
       expect(mockWebview.messages.find((m) => m.type === 'agentToolPermission')).toBeUndefined();
     });

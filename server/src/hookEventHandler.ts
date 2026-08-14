@@ -355,9 +355,9 @@ export class HookEventHandler {
         // identical for both (agentToolDone + clear currentHookToolId), so one branch suffices.
         return this.handlePostToolUse(agent, agentId);
       case 'subagentStart':
-        return this.provider.team ? this.handleSubagentStart(event, agent, agentId) : undefined;
+        return this.handleSubagentStart(normEvent, event, agent, agentId);
       case 'subagentEnd':
-        return this.provider.team ? this.handleSubagentStop(agent, agentId) : undefined;
+        return this.handleSubagentStop(normEvent, agent, agentId);
       case 'permissionRequest':
         // Handles BOTH the PermissionRequest hook AND the Notification(permission_prompt)
         // hook -- normalizeHookEvent collapses them into one event kind.
@@ -511,8 +511,29 @@ export class HookEventHandler {
    *
    * For old-style Task/Agent subagents (inline, no run_in_background), creates
    * the child character immediately via hooks without waiting for JSONL polling.
+   *
+   * Providers without a transcript (e.g. the web/REST provider) supply a real
+   * `parentToolId`/`toolId` directly on the normalized event instead of Claude's
+   * `'current'` sentinel (which requires JSONL-populated `activeToolNames` to
+   * resolve) -- those take a direct fast path with no team/JSONL dependency.
    */
-  private handleSubagentStart(event: HookEvent, agent: AgentState, agentId: number): void {
+  private handleSubagentStart(
+    normEvent: Extract<AgentEvent, { kind: 'subagentStart' }>,
+    event: HookEvent,
+    agent: AgentState,
+    agentId: number,
+  ): void {
+    if (normEvent.parentToolId !== 'current') {
+      this.createSubagentCharacter(
+        agent,
+        agentId,
+        normEvent.parentToolId,
+        normEvent.toolId,
+        normEvent.toolName,
+      );
+      return;
+    }
+
     const agentType = this.provider.team?.extractTeammateNameFromEvent(event) ?? 'unknown';
 
     // Decide path: teammate spawn vs basic within-turn subagent.
@@ -545,11 +566,26 @@ export class HookEventHandler {
     }
     if (!parentToolId) return; // JSONL will handle it via agent_progress tool_use
 
-    // Create child sub-agent character immediately (same as old behavior).
-    const subToolId = `hook-sub-${agentType}-${Date.now()}`;
-    const status = `Subtask: ${agentType}`;
+    this.createSubagentCharacter(
+      agent,
+      agentId,
+      parentToolId,
+      `hook-sub-${agentType}-${Date.now()}`,
+      agentType,
+    );
+  }
 
-    // Track sub-agent
+  /** Create and broadcast a sub-agent character under `parentToolId`, tracking
+   *  it so a later `subagentEnd`/turn-end can find and clear it. */
+  private createSubagentCharacter(
+    agent: AgentState,
+    agentId: number,
+    parentToolId: string,
+    subToolId: string,
+    label: string,
+  ): void {
+    const status = `Subtask: ${label}`;
+
     let subTools = agent.activeSubagentToolIds.get(parentToolId);
     if (!subTools) {
       subTools = new Set();
@@ -562,7 +598,7 @@ export class HookEventHandler {
       subNames = new Map();
       agent.activeSubagentToolNames.set(parentToolId, subNames);
     }
-    subNames.set(subToolId, agentType);
+    subNames.set(subToolId, label);
 
     this.agents.broadcast({
       type: 'subagentToolStart',
@@ -580,8 +616,26 @@ export class HookEventHandler {
    * independent agents, not sub-agent characters to destroy).
    *
    * For old-style Task subagents: removes the child character from the office.
+   *
+   * Providers without a transcript supply a real `parentToolId` directly (see
+   * `handleSubagentStart`) and take the same direct fast path.
    */
-  private handleSubagentStop(agent: AgentState, agentId: number): void {
+  private handleSubagentStop(
+    normEvent: Extract<AgentEvent, { kind: 'subagentEnd' }>,
+    agent: AgentState,
+    agentId: number,
+  ): void {
+    if (normEvent.parentToolId !== 'current') {
+      agent.activeSubagentToolIds.delete(normEvent.parentToolId);
+      agent.activeSubagentToolNames.delete(normEvent.parentToolId);
+      this.agents.broadcast({
+        type: 'subagentClear',
+        id: agentId,
+        parentToolId: normEvent.parentToolId,
+      });
+      return;
+    }
+
     // Check if this agent has inline teammates (independent agents with leadAgentId).
     // Just mark them waiting -- SubagentStop fires per-task-iteration; teammates may
     // sit idle for minutes between lead requests before being re-invoked.

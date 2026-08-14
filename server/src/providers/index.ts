@@ -21,16 +21,18 @@
 
 import type { HookProvider } from '../../../core/src/provider.js';
 import { claudeProvider } from './hook/claude/claude.js';
+import { webProvider } from './hook/web/web.js';
 
 export { claudeProvider } from './hook/claude/claude.js';
 export { copyHookScript } from './hook/claude/claudeHookInstaller.js';
+export { webProvider } from './hook/web/web.js';
 
 /** Provider id used when an unregistered `providerId` is requested. Preserves
  *  the pre-registry behavior of "every hook POST reaches the Claude provider"
  *  for any id the registry doesn't recognize. */
 export const DEFAULT_PROVIDER_ID = claudeProvider.id;
 
-const ALL_PROVIDERS: readonly HookProvider[] = [claudeProvider];
+const ALL_PROVIDERS: readonly HookProvider[] = [claudeProvider, webProvider];
 
 const providersById = new Map<string, HookProvider>(ALL_PROVIDERS.map((p) => [p.id, p]));
 
