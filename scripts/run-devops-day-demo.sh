@@ -1,26 +1,37 @@
 #!/usr/bin/env bash
 #
 # run-devops-day-demo.sh -- starts a standalone Pixel Agents server and then
-# plays the 10-minute "day in the life of a DevOps team" simulation against
-# it (scripts/simulate-devops-day.mjs), so you can watch it unfold live in
-# a browser.
+# plays a "day in the life of a DevOps team" simulation against it, so you
+# can watch it unfold live in a browser. Two modes:
+#
+#   (default)  scripts/simulate-devops-day.mjs -- one scripted 10-minute
+#              story with a beginning, a climactic incident, and an end.
+#   --loop     scripts/simulate-devops-loop.mjs -- an ENDLESS show: every
+#              role runs its own independent, randomized, staggered loop
+#              forever (Ctrl+C to stop), so there's no single "day boundary"
+#              where the whole office resets at once -- new tickets, PRs,
+#              releases, and incidents just keep organically happening,
+#              overlapping in time the way a real always-on team's does.
 #
 # Temporarily swaps in scripts/devops-demo-layout.json -- a wider, more
-# spread-out 9-desk office -- so the demo's parallel status bubbles don't
+# spread-out 14-desk office -- so the demo's parallel status bubbles don't
 # visually collide the way they do in the small default office. Your own
 # saved layout (~/.pixel-agents/layout.json) is backed up first and
 # restored automatically when the script exits, however it exits.
 #
 # Usage:
-#   ./scripts/run-devops-day-demo.sh [--speed N] [--port N] [--no-pause] [--keep-layout]
+#   ./scripts/run-devops-day-demo.sh [--loop] [--speed N] [--port N] [--no-pause] [--keep-layout] [--duration S]
 #
-#   --speed N       Forwarded to the simulation (default 1 = real 10 minutes).
+#   --loop          Run the endless show instead of the one-shot 10-minute story.
+#   --speed N       Forwarded to the simulation (default 1 = real time).
 #   --port N        Port for the standalone server (default 3100).
 #   --no-pause      Skip the "press Enter when ready" prompt -- start the
 #                   simulation immediately after the server is healthy.
 #   --keep-layout   Don't swap in the demo layout -- use whatever layout the
 #                   server already has (you'll likely see overlapping status
 #                   bubbles with more than a handful of concurrent agents).
+#   --duration S    (--loop only) stop after S real seconds instead of running
+#                   forever -- forwarded straight to simulate-devops-loop.mjs.
 
 set -euo pipefail
 
@@ -30,6 +41,7 @@ cd "$ROOT_DIR"
 PORT=3100
 NO_PAUSE=0
 KEEP_LAYOUT=0
+LOOP_MODE=0
 SIM_ARGS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -45,12 +57,21 @@ while [ "$#" -gt 0 ]; do
       KEEP_LAYOUT=1
       shift
       ;;
+    --loop)
+      LOOP_MODE=1
+      shift
+      ;;
     *)
       SIM_ARGS+=("$1")
       shift
       ;;
   esac
 done
+
+SIM_SCRIPT="scripts/simulate-devops-day.mjs"
+if [ "${LOOP_MODE}" -eq 1 ]; then
+  SIM_SCRIPT="scripts/simulate-devops-loop.mjs"
+fi
 
 if [ ! -f dist/cli.js ]; then
   echo "dist/cli.js not found -- building Pixel Agents first (npm run build)..."
@@ -82,7 +103,7 @@ if [ "${KEEP_LAYOUT}" -eq 0 ]; then
   fi
   cp "${ROOT_DIR}/scripts/devops-demo-layout.json" "${LAYOUT_PATH}"
   LAYOUT_SWAPPED=1
-  echo "Swapped in the demo's 9-desk office layout (your own layout is backed up)."
+  echo "Swapped in the demo's 14-desk office layout (your own layout is backed up)."
 fi
 
 echo "Starting Pixel Agents standalone server on port ${PORT}..."
@@ -136,12 +157,16 @@ echo "     higher zoom since desk spacing grows in screen pixels with it."
 echo ""
 
 if [ "${NO_PAUSE}" -eq 0 ]; then
-  read -r -p "Press Enter once you're ready to start the 10-minute simulation... " _
+  read -r -p "Press Enter once you're ready to start the simulation... " _
 fi
 
 echo ""
-echo "Starting the DevOps day simulation..."
-node scripts/simulate-devops-day.mjs --port "${PORT}" "${SIM_ARGS[@]}"
+if [ "${LOOP_MODE}" -eq 1 ]; then
+  echo "Starting the endless DevOps circle -- Ctrl+C to stop whenever you're done watching."
+else
+  echo "Starting the DevOps day simulation..."
+fi
+node "${SIM_SCRIPT}" --port "${PORT}" "${SIM_ARGS[@]}"
 
 echo ""
 echo "Demo complete. Ctrl+C or close this shell to stop the server, or wait -- it stops automatically now."
