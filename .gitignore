@@ -44,6 +44,8 @@ agent-orchestrator.yaml
 /docs/e2e-*.md
 !/docs/e2e-claude-mocking.md
 
+/dev/
+
 .playwright-mcp/
 
 # Agent-orchestrator / tooling scaffolding

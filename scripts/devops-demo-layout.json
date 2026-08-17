@@ -2033,196 +2033,10 @@
   ],
   "furniture": [
     {
-      "uid": "f-1786948776477-demo",
-      "type": "DESK_FRONT",
-      "col": 11,
-      "row": 11
-    },
-    {
-      "uid": "f-1786948776478-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 11,
-      "row": 12
-    },
-    {
-      "uid": "f-1786948776479-demo",
-      "type": "DESK_FRONT",
-      "col": 13,
-      "row": 11
-    },
-    {
-      "uid": "f-1786948776480-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 13,
-      "row": 12
-    },
-    {
-      "uid": "f-1786948776481-demo",
-      "type": "DESK_FRONT",
-      "col": 15,
-      "row": 11
-    },
-    {
-      "uid": "f-1786948776482-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 15,
-      "row": 12
-    },
-    {
-      "uid": "f-1786948776483-demo",
-      "type": "DESK_FRONT",
-      "col": 17,
-      "row": 11
-    },
-    {
-      "uid": "f-1786948776484-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 17,
-      "row": 12
-    },
-    {
-      "uid": "f-1786948776485-demo",
-      "type": "DESK_FRONT",
-      "col": 12,
-      "row": 13
-    },
-    {
-      "uid": "f-1786948776486-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 12,
-      "row": 14
-    },
-    {
-      "uid": "f-1786948776487-demo",
-      "type": "DESK_FRONT",
-      "col": 16,
-      "row": 13
-    },
-    {
-      "uid": "f-1786948776488-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 16,
-      "row": 14
-    },
-    {
-      "uid": "f-1786948776489-demo",
-      "type": "DESK_FRONT",
-      "col": 18,
-      "row": 13
-    },
-    {
-      "uid": "f-1786948776490-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 18,
-      "row": 14
-    },
-    {
-      "uid": "f-1786948776491-demo",
-      "type": "DESK_FRONT",
-      "col": 11,
-      "row": 15
-    },
-    {
-      "uid": "f-1786948776492-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 11,
-      "row": 16
-    },
-    {
-      "uid": "f-1786948776493-demo",
-      "type": "DESK_FRONT",
-      "col": 13,
-      "row": 15
-    },
-    {
-      "uid": "f-1786948776494-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 13,
-      "row": 16
-    },
-    {
-      "uid": "f-1786948776495-demo",
-      "type": "DESK_FRONT",
-      "col": 15,
-      "row": 15
-    },
-    {
-      "uid": "f-1786948776496-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 15,
-      "row": 16
-    },
-    {
-      "uid": "f-1786948776497-demo",
-      "type": "DESK_FRONT",
-      "col": 17,
-      "row": 15
-    },
-    {
-      "uid": "f-1786948776498-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 17,
-      "row": 16
-    },
-    {
-      "uid": "f-1786948776499-demo",
-      "type": "DESK_FRONT",
-      "col": 12,
-      "row": 17
-    },
-    {
-      "uid": "f-1786948776500-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 12,
-      "row": 18
-    },
-    {
-      "uid": "f-1786948776501-demo",
-      "type": "DESK_FRONT",
-      "col": 14,
-      "row": 17
-    },
-    {
-      "uid": "f-1786948776502-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 14,
-      "row": 18
-    },
-    {
-      "uid": "f-1786948776503-demo",
-      "type": "DESK_FRONT",
-      "col": 16,
-      "row": 17
-    },
-    {
-      "uid": "f-1786948776504-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 16,
-      "row": 18
-    },
-    {
-      "uid": "f-1786948776505-demo",
-      "type": "DESK_FRONT",
-      "col": 18,
-      "row": 17
-    },
-    {
-      "uid": "f-1786948776506-demo",
-      "type": "WOODEN_CHAIR_FRONT",
-      "col": 18,
-      "row": 18
-    },
-    {
       "uid": "f-1773353910654-5cdg",
       "type": "TABLE_FRONT",
       "col": 4,
       "row": 16
-    },
-    {
-      "uid": "f-1773354646615-jhxl",
-      "type": "COFFEE_TABLE",
-      "col": 14,
-      "row": 14
     },
     {
       "uid": "f-1773354686967-yiua",
@@ -2273,6 +2087,30 @@
       "row": 15
     },
     {
+      "uid": "f-1773354877474-kt9s",
+      "type": "WOODEN_CHAIR_SIDE",
+      "col": 3,
+      "row": 18
+    },
+    {
+      "uid": "f-1773354879805-px9b",
+      "type": "WOODEN_CHAIR_SIDE",
+      "col": 3,
+      "row": 16
+    },
+    {
+      "uid": "f-1773354880309-yphd",
+      "type": "WOODEN_CHAIR_SIDE:left",
+      "col": 7,
+      "row": 16
+    },
+    {
+      "uid": "f-1773354881902-9m50",
+      "type": "WOODEN_CHAIR_SIDE:left",
+      "col": 7,
+      "row": 18
+    },
+    {
       "uid": "f-1773354931010-8vvr",
       "type": "DESK_FRONT",
       "col": 2,
@@ -2283,6 +2121,18 @@
       "type": "DESK_FRONT",
       "col": 6,
       "row": 12
+    },
+    {
+      "uid": "f-1773356768339-eo6u",
+      "type": "CUSHIONED_BENCH",
+      "col": 3,
+      "row": 14
+    },
+    {
+      "uid": "f-1773356769007-a8jm",
+      "type": "CUSHIONED_BENCH",
+      "col": 7,
+      "row": 14
     },
     {
       "uid": "f-1773356781294-b69z",
@@ -2367,6 +2217,55 @@
       "type": "SMALL_PAINTING_2",
       "col": 17,
       "row": 9
+    },
+    {
+      "uid": "f-1786950925314-4h7r",
+      "type": "DESK_FRONT",
+      "col": 11,
+      "row": 11
+    },
+    {
+      "uid": "f-1786951054300-aa7f",
+      "type": "WOODEN_CHAIR_FRONT",
+      "col": 11,
+      "row": 13
+    },
+    {
+      "uid": "f-1786951892385-wk75",
+      "type": "DESK_FRONT",
+      "col": 16,
+      "row": 11
+    },
+    {
+      "uid": "f-1786952436514-mhks",
+      "type": "WOODEN_CHAIR_FRONT",
+      "col": 16,
+      "row": 13
+    },
+    {
+      "uid": "f-1786952542568-alhn",
+      "type": "DESK_FRONT",
+      "col": 11,
+      "row": 14
+    },
+    {
+      "uid": "f-1786952651578-0q7u",
+      "type": "WOODEN_CHAIR_FRONT",
+      "col": 11,
+      "row": 15
+    },
+    {
+      "uid": "f-1786952761592-qglx",
+      "type": "DESK_FRONT",
+      "col": 16,
+      "row": 14
+    },
+    {
+      "uid": "f-1786952871288-53es",
+      "type": "WOODEN_CHAIR_FRONT",
+      "col": 16,
+      "row": 15
     }
-  ]
+  ],
+  "pets": []
 }
