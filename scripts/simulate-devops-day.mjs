@@ -34,6 +34,15 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import {
+  LOG_PREFIX,
+  banner,
+  describeEvent,
+  logError,
+  logWarn,
+  startHeartbeat,
+} from './devops-sim-log.mjs';
+
 // ── CLI args ────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
@@ -867,34 +876,16 @@ async function postEvent(config, sessionId, event) {
   });
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    console.error(`  ! HTTP ${response.status} for ${sessionId} ${event.hook_event_name}: ${text}`);
+    logError(`HTTP ${response.status} for ${sessionId} ${event.hook_event_name}: ${text}`);
   }
 }
 
 // ── Narration ─────────────────────────────────────────────────────────
-
-function describe(event) {
-  switch (event.hook_event_name) {
-    case 'sessionStart':
-      return 'walks into the office';
-    case 'toolStart':
-      return `${event.tool_name}${event.status ? ` -- "${event.status}"` : ''}`;
-    case 'toolEnd':
-      return 'finished a task';
-    case 'subagentStart':
-      return `spawns sub-task "${event.tool_name}"`;
-    case 'subagentEnd':
-      return 'sub-task done';
-    case 'permissionRequest':
-      return 'needs approval';
-    case 'turnEnd':
-      return event.awaiting_input ? 'waiting for input' : 'done for now';
-    case 'sessionEnd':
-      return `leaves the office (${event.reason ?? 'session end'})`;
-    default:
-      return event.hook_event_name;
-  }
-}
+//
+// describeEvent() comes from devops-sim-log.mjs (shared with
+// simulate-devops-loop.mjs); this script additionally shows the event's
+// *story* time (t=) alongside real elapsed time (+), since its schedule is
+// a precomputed fixed timeline rather than live-generated.
 
 // ── Scheduler ────────────────────────────────────────────────────────────
 
@@ -903,27 +894,36 @@ async function main() {
   const totalSeconds = Math.max(...events.map((e) => e.t));
   const config = DRY_RUN ? null : readServerConfig();
 
-  console.log('');
-  console.log('=== Pixel Agents: a day in the life of a DevOps team ===');
-  console.log(
+  const lines = [
     `${AGENTS.length} agents, ${events.length} events, ${totalSeconds}s of story compressed to ${(totalSeconds / SPEED).toFixed(0)}s (speed x${SPEED}).`,
-  );
-  if (DRY_RUN) console.log('(dry run -- printing events, not sending them)');
-  else console.log(`Posting to http://127.0.0.1:${config.port}/api/hooks/web`);
-  console.log('');
+  ];
+  if (DRY_RUN) lines.push('(dry run -- printing events, not sending them)');
+  else lines.push(`Posting to http://127.0.0.1:${config.port}/api/hooks/web`);
+  banner(lines);
 
+  let eventsSent = 0;
+  const activeSessions = new Set();
   const startedAt = Date.now();
+  startHeartbeat(20_000, () => {
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+    const agents = [...activeSessions].sort().join(', ') || 'none yet';
+    return `still running -- +${elapsed}s elapsed, ${eventsSent} events sent, active agents: ${agents}`;
+  });
+
   const timers = events.map((e) =>
     setTimeout(
       async () => {
         const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+        eventsSent++;
+        if (e.event.hook_event_name === 'sessionStart') activeSessions.add(e.sessionId);
+        if (e.event.hook_event_name === 'sessionEnd') activeSessions.delete(e.sessionId);
         console.log(
-          `[t=${String(e.t).padStart(3, ' ')}s / +${elapsed}s] ${e.sessionId}: ${describe(e.event)}`,
+          `${LOG_PREFIX} [t=${String(e.t).padStart(3, ' ')}s / +${elapsed}s] ${e.sessionId}: ${describeEvent(e.event)}`,
         );
         try {
           await postEvent(config, e.sessionId, e.event);
         } catch (err) {
-          console.error(`  ! failed to send event for ${e.sessionId}: ${err.message}`);
+          logError(`failed to send event for ${e.sessionId}: ${err.message}`);
         }
       },
       (e.t * 1000) / SPEED,
@@ -931,17 +931,17 @@ async function main() {
   );
 
   process.on('SIGINT', () => {
-    console.log('\nInterrupted -- clearing remaining scheduled events.');
+    logWarn('Interrupted -- clearing remaining scheduled events.');
     for (const timer of timers) clearTimeout(timer);
     process.exit(130);
   });
 
   await new Promise((resolve) => setTimeout(resolve, (totalSeconds * 1000) / SPEED + 500));
   console.log('');
-  console.log('=== Simulation complete. ===');
+  console.log(`${LOG_PREFIX} Simulation complete.`);
 }
 
 main().catch((err) => {
-  console.error(`Error: ${err.message}`);
+  logError(`Fatal: ${err.message}`);
   process.exit(1);
 });

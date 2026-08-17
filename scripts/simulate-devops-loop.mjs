@@ -58,6 +58,8 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import { banner, logEvent, logError, logWarn, startHeartbeat } from './devops-sim-log.mjs';
+
 // ── CLI args ────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
@@ -117,31 +119,15 @@ function readServerConfig() {
 
 const config = DRY_RUN ? null : readServerConfig();
 
-function describe(event) {
-  switch (event.hook_event_name) {
-    case 'sessionStart':
-      return 'walks into the office';
-    case 'toolStart':
-      return `${event.tool_name}${event.status ? ` -- "${event.status}"` : ''}`;
-    case 'toolEnd':
-      return 'finished a task';
-    case 'subagentStart':
-      return `spawns sub-task "${event.tool_name}"`;
-    case 'subagentEnd':
-      return 'sub-task done';
-    case 'permissionRequest':
-      return 'needs approval';
-    case 'turnEnd':
-      return event.awaiting_input ? 'waiting for input' : 'done for now';
-    case 'sessionEnd':
-      return `leaves the office (${event.reason ?? 'session end'})`;
-    default:
-      return event.hook_event_name;
-  }
-}
+// ── Live stats for the heartbeat (see startHeartbeat below) ──────────────
+let eventsSent = 0;
+const activeSessions = new Set();
 
 async function send(sessionId, event) {
-  console.log(`[+${elapsedS()}s] ${sessionId}: ${describe(event)}`);
+  eventsSent++;
+  if (event.hook_event_name === 'sessionStart') activeSessions.add(sessionId);
+  if (event.hook_event_name === 'sessionEnd') activeSessions.delete(sessionId);
+  logEvent(elapsedS(), sessionId, event);
   if (DRY_RUN) return;
   try {
     const response = await fetch(`http://127.0.0.1:${config.port}/api/hooks/web`, {
@@ -151,12 +137,10 @@ async function send(sessionId, event) {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      console.error(
-        `  ! HTTP ${response.status} for ${sessionId} ${event.hook_event_name}: ${text}`,
-      );
+      logError(`HTTP ${response.status} for ${sessionId} ${event.hook_event_name}: ${text}`);
     }
   } catch (err) {
-    console.error(`  ! failed to send event for ${sessionId}: ${err.message}`);
+    logError(`failed to send event for ${sessionId}: ${err.message}`);
   }
 }
 
@@ -608,26 +592,30 @@ async function sreLoop() {
 // ── Entry point ──────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('');
-  console.log('=== Pixel Agents: the endless DevOps circle ===');
-  console.log('8 roles, running forever in parallel -- Ctrl+C to stop.');
-  if (DRY_RUN) console.log('(dry run -- printing events, not sending them)');
-  else console.log(`Posting to http://127.0.0.1:${config.port}/api/hooks/web`);
-  if (Number.isFinite(DURATION_S)) console.log(`(capped at ${DURATION_S}s for this run)`);
-  console.log('');
+  const lines = [
+    'Starting the endless DevOps circle: 8 roles, running forever in parallel.',
+    'Ctrl+C to stop.',
+  ];
+  if (DRY_RUN) lines.push('(dry run -- printing events, not sending them)');
+  else lines.push(`Posting to http://127.0.0.1:${config.port}/api/hooks/web`);
+  if (Number.isFinite(DURATION_S)) lines.push(`(capped at ${DURATION_S}s for this run)`);
+  banner(lines);
+
+  startHeartbeat(20_000, () => {
+    const agents = [...activeSessions].sort().join(', ') || 'none yet';
+    return `still running -- +${elapsedS()}s elapsed, ${eventsSent} events sent, active agents: ${agents}`;
+  });
 
   if (Number.isFinite(DURATION_S)) {
     setTimeout(() => {
       running = false;
-      console.log(
-        '\n=== Duration reached, stopping. (Loops finish their current step, then exit.) ===',
-      );
+      logWarn('Duration reached, stopping. (Loops finish their current step, then exit.)');
       setTimeout(() => process.exit(0), 2000);
     }, DURATION_S * 1000); // real wall-clock seconds, deliberately NOT divided by SPEED
   }
 
   process.on('SIGINT', () => {
-    console.log('\n=== Interrupted -- stopping. ===');
+    logWarn('Interrupted -- stopping.');
     process.exit(130);
   });
 
@@ -644,6 +632,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`Error: ${err.message}`);
+  logError(`Fatal: ${err.message}`);
   process.exit(1);
 });
