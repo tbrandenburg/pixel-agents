@@ -20,7 +20,7 @@
 # restored automatically when the script exits, however it exits.
 #
 # Usage:
-#   ./scripts/run-devops-day-demo.sh [--loop] [--speed N] [--port N] [--no-pause] [--keep-layout] [--duration S]
+#   ./scripts/run-devops-day-demo.sh [--loop] [--speed N] [--port N] [--no-pause] [--keep-layout] [--keep-settings] [--duration S]
 #
 #   --loop          Run the endless show instead of the one-shot 10-minute story.
 #   --speed N       Forwarded to the simulation (default 1 = real time).
@@ -30,6 +30,10 @@
 #   --keep-layout   Don't swap in the demo layout -- use whatever layout the
 #                   server already has (you'll likely see overlapping status
 #                   bubbles with more than a handful of concurrent agents).
+#   --keep-settings Don't force-enable 'Watch All Sessions'/'Always Show
+#                   Labels' -- use whatever settings the server already has
+#                   (you'll likely see an empty office unless you enable
+#                   'Watch All Sessions' yourself).
 #   --duration S    (--loop only) stop after S real seconds instead of running
 #                   forever -- forwarded straight to simulate-devops-loop.mjs.
 
@@ -41,6 +45,7 @@ cd "$ROOT_DIR"
 PORT=3100
 NO_PAUSE=0
 KEEP_LAYOUT=0
+KEEP_SETTINGS=0
 LOOP_MODE=0
 SIM_ARGS=()
 while [ "$#" -gt 0 ]; do
@@ -55,6 +60,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --keep-layout)
       KEEP_LAYOUT=1
+      shift
+      ;;
+    --keep-settings)
+      KEEP_SETTINGS=1
       shift
       ;;
     --loop)
@@ -106,6 +115,46 @@ if [ "${KEEP_LAYOUT}" -eq 0 ]; then
   echo "Swapped in the demo's 14-desk office layout (your own layout is backed up)."
 fi
 
+# ── Settings swap (reversible) ────────────────────────────────────────────
+# 'Watch All Sessions' is required for the simulated agents (fake project
+# directories the server has never seen) to be adopted and rendered at all --
+# missing this one manual step is the single most common reason someone sees
+# an empty office. Pre-seed it directly in config.json instead of relying on
+# a person to click it in Settings after a wall of instructions.
+CONFIG_DIR="${HOME}/.pixel-agents"
+CONFIG_PATH="${CONFIG_DIR}/config.json"
+CONFIG_BACKUP="${CONFIG_DIR}/config.json.pre-devops-demo-backup"
+CONFIG_SWAPPED=0
+
+restore_config() {
+  if [ "${CONFIG_SWAPPED}" -eq 1 ]; then
+    if [ -f "${CONFIG_BACKUP}" ]; then
+      echo "Restoring your previous settings..."
+      mv -f "${CONFIG_BACKUP}" "${CONFIG_PATH}"
+    else
+      echo "Removing the demo settings override (you had none before)..."
+      rm -f "${CONFIG_PATH}"
+    fi
+  fi
+}
+
+mkdir -p "${CONFIG_DIR}"
+if [ "${KEEP_SETTINGS}" -eq 0 ]; then
+  if [ -f "${CONFIG_PATH}" ]; then
+    cp "${CONFIG_PATH}" "${CONFIG_BACKUP}"
+  fi
+  node -e "
+const fs = require('fs');
+const path = '${CONFIG_PATH}';
+let config = {};
+try { config = JSON.parse(fs.readFileSync(path, 'utf-8')); } catch { /* no existing config, start fresh */ }
+config.standalone = { ...(config.standalone ?? {}), watchAllSessions: true, alwaysShowLabels: true };
+fs.writeFileSync(path, JSON.stringify(config, null, 2));
+"
+  CONFIG_SWAPPED=1
+  echo "Enabled 'Watch All Sessions' + 'Always Show Labels' for this demo (your own settings are backed up)."
+fi
+
 echo "Starting Pixel Agents standalone server on port ${PORT}..."
 node dist/cli.js --port "${PORT}" &
 SERVER_PID=$!
@@ -115,6 +164,7 @@ cleanup() {
   echo "Stopping Pixel Agents server (pid ${SERVER_PID})..."
   kill "${SERVER_PID}" 2>/dev/null || true
   restore_layout
+  restore_config
 }
 trap cleanup EXIT INT TERM
 
@@ -148,12 +198,17 @@ fi
 echo ""
 echo "Before the simulation starts:"
 echo "  1. Open ${URL} in your browser (if it didn't open automatically)."
-echo "  2. Click Settings and enable 'Watch All Sessions' -- the simulated"
-echo "     agents use fake project directories the server has never seen,"
-echo "     so this setting is required for them to be adopted and rendered."
-echo "  3. Zoom in 2-3 times (top-left + button) for the clearest view of the"
-echo "     new engineering floor -- status bubbles are easiest to read at"
-echo "     higher zoom since desk spacing grows in screen pixels with it."
+if [ "${KEEP_SETTINGS}" -eq 0 ]; then
+  echo "     'Watch All Sessions' is already enabled for you, so agents should"
+  echo "     appear as soon as the simulation starts sending events."
+else
+  echo "     Click Settings and enable 'Watch All Sessions' -- the simulated"
+  echo "     agents use fake project directories the server has never seen,"
+  echo "     so this setting is required for them to be adopted and rendered."
+fi
+echo "  2. Zoom in 2-3 times (top-left + button) for the clearest view --"
+echo "     status bubbles are easiest to read at higher zoom since desk"
+echo "     spacing grows in screen pixels with it."
 echo ""
 
 if [ "${NO_PAUSE}" -eq 0 ]; then
