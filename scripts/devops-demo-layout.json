@@ -2173,7 +2173,7 @@
     {
       "uid": "f-1773356878781-rncl",
       "type": "PLANT_2",
-      "col": 11,
+      "col": 13,
       "row": 10
     },
     {
@@ -2265,6 +2265,18 @@
       "type": "WOODEN_CHAIR_FRONT",
       "col": 16,
       "row": 15
+    },
+    {
+      "uid": "f-1786960361988-to5c",
+      "type": "WOODEN_CHAIR_FRONT",
+      "col": 11,
+      "row": 10
+    },
+    {
+      "uid": "f-1786960432612-x9fc",
+      "type": "WOODEN_CHAIR_FRONT",
+      "col": 16,
+      "row": 10
     }
   ],
   "pets": []
