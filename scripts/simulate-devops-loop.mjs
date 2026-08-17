@@ -151,6 +151,27 @@ async function toolCall(sessionId, name, status, durationSeconds) {
   await send(sessionId, { hook_event_name: 'toolEnd', tool_id: toolId });
 }
 
+/**
+ * Send the agent idle (turnEnd) and actually pause long enough for it to be
+ * worth it -- the office's own wander AI waits 2-20s between moves and takes
+ * 3-6 moves before heading back to its seat (see WANDER_PAUSE and
+ * WANDER_MOVES constants in webview-ui/src/constants.ts), so a turnEnd
+ * immediately followed by the next toolStart never gives a character time to
+ * actually get up from its desk -- it just flips status text while staying
+ * seated. A real idle break needs a real pause on this side too, not just
+ * the event.
+ *
+ * `chance` is the probability this actually happens (call unconditionally;
+ * rolls its own dice) -- kept high for persistent roles specifically
+ * because they otherwise chain toolStart/toolEnd back-to-back forever with
+ * no idle in between at all.
+ */
+async function maybeIdleBreak(sessionId, chance, minSeconds, maxSeconds, awaitingInput = false) {
+  if (Math.random() >= chance) return;
+  await send(sessionId, { hook_event_name: 'turnEnd', awaiting_input: awaitingInput });
+  await sleepS(randInt(minSeconds, maxSeconds));
+}
+
 // ── Flavor pools (fresh text every cycle, never the same clip twice) ────
 
 const FEATURES = [
@@ -284,10 +305,9 @@ async function poLoop() {
         randInt(20, 35),
       );
     }
-    if (Math.random() < 0.12) {
-      await send(id, { hook_event_name: 'turnEnd', awaiting_input: true });
-      await sleepS(randInt(20, 40));
-    }
+    // Real coffee-break odds -- most work items end with an actual rest,
+    // long enough to visibly wander away from the desk and back.
+    await maybeIdleBreak(id, 0.55, 20, 40, true);
   }
 }
 
@@ -395,7 +415,8 @@ async function ciLoop() {
     if (ciQueue.length === 0) {
       const t = pick(CI_IDLE_TOOLS);
       await toolCall(id, t.name, t.status, randInt(5, 12));
-      await sleepS(randInt(3, 8));
+      // No PRs waiting -- a real break, not just a status-text flip.
+      await maybeIdleBreak(id, 0.5, 15, 30, true);
       continue;
     }
     const job = ciQueue.shift();
@@ -425,10 +446,7 @@ async function qaLoop() {
       );
       await send(id, { hook_event_name: 'turnEnd', awaiting_input: false });
     }
-    if (Math.random() < 0.1) {
-      await send(id, { hook_event_name: 'turnEnd', awaiting_input: true });
-      await sleepS(randInt(15, 30));
-    }
+    await maybeIdleBreak(id, 0.5, 15, 30, true);
   }
 }
 
@@ -458,6 +476,7 @@ async function securityLoop() {
       );
       await send(id, { hook_event_name: 'turnEnd', awaiting_input: false });
     }
+    await maybeIdleBreak(id, 0.5, 15, 30, true);
   }
 }
 
@@ -576,15 +595,25 @@ async function sreLoop() {
   await send(id, { hook_event_name: 'sessionStart', cwd: '/workspace/observability' });
   await sleepS(1);
   while (running) {
-    const watchId = nextToolId();
-    await send(id, {
-      hook_event_name: 'toolStart',
-      tool_id: watchId,
-      tool_name: 'DashboardWatch',
-      status: 'Watching golden signals dashboard',
-    });
-    await sleepS(randInt(90, 180)); // time between incidents -- randomized, never a fixed metronome
-    await send(id, { hook_event_name: 'toolEnd', tool_id: watchId });
+    // Time until the next incident, randomized -- but spent as several short
+    // watch segments with real idle breaks between them, not one giant
+    // continuous "active" tool call. Otherwise sre-oncall would visibly sit
+    // at its desk for a full 90-180s straight, never once getting up.
+    let remaining = randInt(90, 180);
+    while (remaining > 0) {
+      const segment = Math.min(remaining, randInt(20, 40));
+      const watchId = nextToolId();
+      await send(id, {
+        hook_event_name: 'toolStart',
+        tool_id: watchId,
+        tool_name: 'DashboardWatch',
+        status: 'Watching golden signals dashboard',
+      });
+      await sleepS(segment);
+      await send(id, { hook_event_name: 'toolEnd', tool_id: watchId });
+      remaining -= segment;
+      if (remaining > 0) await maybeIdleBreak(id, 0.6, 15, 30, true);
+    }
     await triggerIncident(id);
   }
 }
