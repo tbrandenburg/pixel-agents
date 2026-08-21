@@ -13,8 +13,7 @@
 # the corresponding character just appears.
 #
 # Usage:
-#   ./scripts/start-web-server.sh [--port 3100] [--layout path/to/layout.json] \
-#       [--watch-all-sessions]
+#   ./scripts/start-web-server.sh [--port 3100] [--layout path/to/layout.json]
 #
 # --layout copies the given OfficeLayout JSON to ~/.pixel-agents/layout.json
 # before starting the server, since that's the only file the server reads
@@ -22,12 +21,16 @@
 # Without --layout, the server keeps using whatever layout is already there
 # (or falls back to its bundled default-layout.json on first run).
 #
-# --watch-all-sessions persists watchAllSessions=true into the "standalone"
-# namespace of ~/.pixel-agents/config.json before starting (merged in,
-# leaving every other setting untouched). It defaults to false upstream and
-# only affects heuristic JSONL scanning of untracked project directories --
-# hook-delivered REST events (scripts/web-agent.sh) create agents regardless
-# of this flag, so you usually don't need it for a pure curl/REST workflow.
+# This script always persists watchAllSessions=true and alwaysShowLabels=true
+# into the "standalone" namespace of ~/.pixel-agents/config.json before
+# starting (merged in, leaving every other setting untouched) -- both default
+# to false upstream, but a REST-only, no-webview setup has no in-app Settings
+# modal to toggle them, so this script makes them unconditional defaults:
+#   - watchAllSessions: lets heuristic JSONL scanning pick up sessions outside
+#     the current workspace. Hook-delivered REST events (scripts/web-agent.sh)
+#     create agents regardless of this flag either way.
+#   - alwaysShowLabels: keeps agent name labels visible without needing to
+#     hover, useful when driving the office purely from curl.
 #
 # Requires a build first: npm install && npm run build (produces dist/cli.js).
 
@@ -40,7 +43,6 @@ pixel_home="${HOME}/.pixel-agents"
 
 port=""
 layout_file=""
-watch_all_sessions=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -52,12 +54,8 @@ while [ "$#" -gt 0 ]; do
       layout_file="${2:?--layout requires a path}"
       shift 2
       ;;
-    --watch-all-sessions)
-      watch_all_sessions=true
-      shift
-      ;;
     --help|-h)
-      echo "Usage: $0 [--port <number>] [--layout <path/to/layout.json>] [--watch-all-sessions]"
+      echo "Usage: $0 [--port <number>] [--layout <path/to/layout.json>]"
       exit 0
       ;;
     *)
@@ -82,23 +80,25 @@ if [ -n "$layout_file" ]; then
   echo "Installed layout from '$layout_file' -> ${pixel_home}/layout.json"
 fi
 
-if [ "$watch_all_sessions" = true ]; then
-  mkdir -p "$pixel_home"
-  config_json="${pixel_home}/config.json"
-  node -e '
-    const fs = require("fs");
-    const path = process.argv[1];
-    let config = {};
-    try {
-      config = JSON.parse(fs.readFileSync(path, "utf-8"));
-    } catch {
-      // No existing config (or unreadable) -- start fresh.
-    }
-    config.standalone = { ...(config.standalone ?? {}), watchAllSessions: true };
-    fs.writeFileSync(path, JSON.stringify(config, null, 2));
-  ' "$config_json"
-  echo "Enabled watchAllSessions (standalone) -> ${config_json}"
-fi
+mkdir -p "$pixel_home"
+config_json="${pixel_home}/config.json"
+node -e '
+  const fs = require("fs");
+  const path = process.argv[1];
+  let config = {};
+  try {
+    config = JSON.parse(fs.readFileSync(path, "utf-8"));
+  } catch {
+    // No existing config (or unreadable) -- start fresh.
+  }
+  config.standalone = {
+    ...(config.standalone ?? {}),
+    watchAllSessions: true,
+    alwaysShowLabels: true,
+  };
+  fs.writeFileSync(path, JSON.stringify(config, null, 2));
+' "$config_json"
+echo "Enabled watchAllSessions + alwaysShowLabels (standalone) -> ${config_json}"
 
 cli_args=()
 if [ -n "$port" ]; then
